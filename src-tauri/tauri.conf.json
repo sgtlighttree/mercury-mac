@@ -16,11 +16,12 @@
         "title": "Messenger",
         "width": 1000,
         "height": 800,
-        "url": "https://www.messenger.com"
+        "url": "https://www.messenger.com",
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' https://*.messenger.com https://*.facebook.com https://*.fbcdn.net; script-src 'self' 'unsafe-inline' https://*.messenger.com https://*.facebook.com; style-src 'self' 'unsafe-inline' https://*.messenger.com https://*.facebook.com; img-src 'self' data: https://*.messenger.com https://*.facebook.com https://*.fbcdn.net; connect-src 'self' https://*.messenger.com https://*.facebook.com wss://*.messenger.com wss://*.facebook.com;"
     }
   },
   "bundle": {
