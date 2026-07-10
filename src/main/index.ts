@@ -1,7 +1,7 @@
 import { app, BrowserWindow, shell, session } from "electron";
 import * as path from "path";
 import { TARGET_URL } from "./config";
-import { isExternalUrl } from "./links";
+import { isExternalUrl, isHttpUrl } from "./links";
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -22,7 +22,7 @@ function createWindow(): void {
   const wc = mainWindow.webContents;
   wc.setWindowOpenHandler(({ url }) => {
     if (isExternalUrl(url)) {
-      if (url.startsWith("https:") || url.startsWith("http:")) void shell.openExternal(url);
+      if (isHttpUrl(url)) void shell.openExternal(url);
       // non-http(s) schemes are dropped entirely
       return { action: "deny" };
     }
@@ -31,7 +31,7 @@ function createWindow(): void {
   wc.on("will-navigate", (event, url) => {
     if (isExternalUrl(url)) {
       event.preventDefault();
-      if (url.startsWith("https:") || url.startsWith("http:")) void shell.openExternal(url);
+      if (isHttpUrl(url)) void shell.openExternal(url);
       // non-http(s) schemes are dropped entirely
     }
   });
@@ -44,7 +44,7 @@ function createWindow(): void {
 function configureSession(): void {
   const ses = session.defaultSession;
   ses.on("will-download", (_event, item) => {
-    item.setSavePath(path.join(app.getPath("downloads"), item.getFilename()));
+    item.setSavePath(path.join(app.getPath("downloads"), path.basename(item.getFilename())));
   });
 }
 

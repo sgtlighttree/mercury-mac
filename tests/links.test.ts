@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isExternalUrl } from "../src/main/links";
+import { isExternalUrl, isHttpUrl } from "../src/main/links";
 
 describe("isExternalUrl", () => {
   it("keeps messenger.com internal", () => {
@@ -16,5 +16,14 @@ describe("isExternalUrl", () => {
   });
   it("treats an unparseable or non-http value as external (never navigate the app to it)", () => {
     expect(isExternalUrl("javascript:void(0)")).toBe(true);
+  });
+});
+
+describe("isHttpUrl", () => {
+  it("accepts http(s) schemes case-insensitively", () => {
+    expect(isHttpUrl("HTTPS://example.com/A")).toBe(true);
+  });
+  it("rejects non-http schemes", () => {
+    expect(isHttpUrl("javascript:void(0)")).toBe(false);
   });
 });

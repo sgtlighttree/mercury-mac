@@ -14,3 +14,8 @@ export function isExternalUrl(rawUrl: string): boolean {
     (allowed) => host === allowed || host.endsWith("." + allowed),
   );
 }
+
+/** True for http:/https: URLs in any case, the only schemes we hand to shell.openExternal. */
+export function isHttpUrl(rawUrl: string): boolean {
+  return /^https?:/i.test(rawUrl);
+}
