@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, session, ipcMain } from "electron";
+import { app, BrowserWindow, shell, session, ipcMain, desktopCapturer } from "electron";
 import * as path from "path";
 import { TARGET_URL } from "./config";
 import { isExternalUrl, isHttpUrl } from "./links";
@@ -50,6 +50,17 @@ function configureSession(): void {
   // Grant only media (camera/mic) and screen capture; deny all other permissions.
   ses.setPermissionRequestHandler((_wc, permission, callback) => {
     callback(permission === "media" || permission === "display-capture");
+  });
+  // Screen share: grant the primary screen. A source-picker UI is a later enhancement.
+  // Requires the macOS Screen Recording permission (System Settings → Privacy).
+  ses.setDisplayMediaRequestHandler((_request, callback) => {
+    void desktopCapturer.getSources({ types: ["screen"] }).then((sources) => {
+      if (sources.length > 0) {
+        callback({ video: sources[0] });
+      } else {
+        callback({});
+      }
+    });
   });
 }
 
