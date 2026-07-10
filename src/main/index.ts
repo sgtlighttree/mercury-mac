@@ -47,6 +47,10 @@ function configureSession(): void {
   ses.on("will-download", (_event, item) => {
     item.setSavePath(path.join(app.getPath("downloads"), path.basename(item.getFilename())));
   });
+  // Grant only media (camera/mic) and screen capture; deny all other permissions.
+  ses.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(permission === "media" || permission === "display-capture");
+  });
 }
 
 app.whenReady().then(() => {
