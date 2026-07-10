@@ -1,6 +1,7 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, shell } from "electron";
 import * as path from "path";
 import { TARGET_URL } from "./config";
+import { isExternalUrl } from "./links";
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -17,6 +18,22 @@ function createWindow(): void {
       // The preload is esbuild-bundled to a single file so it works sandboxed.
       sandbox: true,
     },
+  });
+  const wc = mainWindow.webContents;
+  wc.setWindowOpenHandler(({ url }) => {
+    if (isExternalUrl(url)) {
+      if (url.startsWith("https:") || url.startsWith("http:")) void shell.openExternal(url);
+      // non-http(s) schemes are dropped entirely
+      return { action: "deny" };
+    }
+    return { action: "allow" };
+  });
+  wc.on("will-navigate", (event, url) => {
+    if (isExternalUrl(url)) {
+      event.preventDefault();
+      if (url.startsWith("https:") || url.startsWith("http:")) void shell.openExternal(url);
+      // non-http(s) schemes are dropped entirely
+    }
   });
   mainWindow.loadURL(TARGET_URL);
   mainWindow.on("closed", () => {
