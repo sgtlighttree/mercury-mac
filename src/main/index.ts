@@ -1,7 +1,8 @@
-import { app, BrowserWindow, shell, session } from "electron";
+import { app, BrowserWindow, shell, session, ipcMain } from "electron";
 import * as path from "path";
 import { TARGET_URL } from "./config";
 import { isExternalUrl, isHttpUrl } from "./links";
+import { IPC } from "../shared/channels";
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -49,6 +50,9 @@ function configureSession(): void {
 }
 
 app.whenReady().then(() => {
+  ipcMain.on(IPC.SET_UNREAD, (_event, count: number) => {
+    if (typeof count === "number" && count >= 0) app.setBadgeCount(count);
+  });
   configureSession();
   createWindow();
   app.on("activate", () => {
