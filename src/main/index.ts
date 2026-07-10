@@ -54,13 +54,15 @@ function configureSession(): void {
   // Screen share: grant the primary screen. A source-picker UI is a later enhancement.
   // Requires the macOS Screen Recording permission (System Settings → Privacy).
   ses.setDisplayMediaRequestHandler((_request, callback) => {
-    void desktopCapturer.getSources({ types: ["screen"] }).then((sources) => {
-      if (sources.length > 0) {
-        callback({ video: sources[0] });
-      } else {
-        callback({});
-      }
-    });
+    void desktopCapturer.getSources({ types: ["screen"] })
+      .then((sources) => {
+        if (sources.length > 0) {
+          callback({ video: sources[0] });
+        } else {
+          callback({});
+        }
+      })
+      .catch(() => callback({}));
   });
 }
 
