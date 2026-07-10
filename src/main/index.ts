@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, shell, session } from "electron";
 import * as path from "path";
 import { TARGET_URL } from "./config";
 import { isExternalUrl } from "./links";
@@ -41,7 +41,15 @@ function createWindow(): void {
   });
 }
 
+function configureSession(): void {
+  const ses = session.defaultSession;
+  ses.on("will-download", (_event, item) => {
+    item.setSavePath(path.join(app.getPath("downloads"), item.getFilename()));
+  });
+}
+
 app.whenReady().then(() => {
+  configureSession();
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
