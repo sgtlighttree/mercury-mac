@@ -18,5 +18,25 @@
     "esbuild": "^0.24.0",
     "typescript": "~5.6.2",
     "vitest": "^2.1.0"
+  },
+  "build": {
+    "appId": "com.mercury.messenger",
+    "productName": "Messenger",
+    "electronLanguages": ["en"],
+    "files": ["dist/**/*", "package.json"],
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "target": [{ "target": "dmg", "arch": ["arm64"] }],
+      "category": "public.app-category.social-networking",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSCameraUsageDescription": "Messenger uses your camera for video calls.",
+        "NSMicrophoneUsageDescription": "Messenger uses your microphone for calls."
+      }
+    }
   }
 }
