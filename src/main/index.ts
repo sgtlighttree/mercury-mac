@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, session, ipcMain, desktopCapturer } from "electron";
+import { app, BrowserWindow, shell, session, ipcMain, desktopCapturer, systemPreferences } from "electron";
 import * as path from "path";
 import { TARGET_URL } from "./config";
 import { isExternalUrl, isHttpUrl, decideWindowOpen } from "./links";
@@ -58,8 +58,35 @@ function configureSession(): void {
     item.setSavePath(path.join(app.getPath("downloads"), path.basename(item.getFilename())));
   });
   // Grant only media (camera/mic) and screen capture; deny all other permissions.
-  ses.setPermissionRequestHandler((_wc, permission, callback) => {
-    callback(permission === "media" || permission === "display-capture");
+  // For media, first ensure macOS-level (TCC) access: Electron does not reliably
+  // trigger the OS prompt on its own, and a web-layer grant is useless without it.
+  ses.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    if (permission === "media") {
+      const wanted: Array<"microphone" | "camera"> = [];
+      const mediaTypes = "mediaTypes" in details ? details.mediaTypes ?? [] : [];
+      if (mediaTypes.includes("audio")) wanted.push("microphone");
+      if (mediaTypes.includes("video")) wanted.push("camera");
+      void Promise.all(
+        wanted.map(async (device) => {
+          // 'not-determined' -> shows the macOS prompt; 'denied' cannot re-prompt.
+          if (systemPreferences.getMediaAccessStatus(device) === "not-determined") {
+            return systemPreferences.askForMediaAccess(device);
+          }
+          return systemPreferences.getMediaAccessStatus(device) === "granted";
+        }),
+      ).then((results) => {
+        const ok = results.every(Boolean);
+        if (!ok) {
+          console.error(
+            "[media] macOS denies capture (grant in System Settings → Privacy):",
+            wanted.map((d) => `${d}=${systemPreferences.getMediaAccessStatus(d)}`).join(" "),
+          );
+        }
+        callback(ok);
+      });
+      return;
+    }
+    callback(permission === "display-capture");
   });
   // Synchronous permission checks (navigator.permissions.query) must agree
   // with the request handler above, or the call UI may silently skip prompting.
