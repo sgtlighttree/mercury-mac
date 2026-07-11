@@ -1,114 +1,79 @@
-# Messenger Tauri
+# Mercury — a lightweight-for-Electron Messenger desktop client
 
-A lightweight, secure, and high-performance desktop wrapper for Facebook Messenger built with **Rust** and **Tauri v2**. This application provides a native-like experience with a significantly lower RAM and storage footprint than official Electron-based alternatives.
+A minimal macOS desktop wrapper for [messenger.com](https://www.messenger.com), built with
+Electron. It's a thin native shell around the real Messenger web app, not a reimplementation:
+almost all product behavior (chat, notifications badge text, calls) comes straight from the site
+itself.
 
-## Features
+## Why Electron, not something smaller
 
-- 🚀 **Performance**: Rust-powered backend for minimal resource usage.
-- 🔒 **Security**: Strict Content Security Policy (CSP) and zero-trust isolation.
-- 🔔 **Native Notifications**: Fully integrated with macOS system notifications.
-- 🎨 **Premium UI**: Custom-designed hybrid Rust/Messenger app icon.
-- 🤖 **Automation**: One-click deployment script to `/Applications`.
+An earlier prototype used Tauri (WebKit). It was dropped because Facebook Messenger's voice/video
+calls depend on a Chrome-only WebRTC API (`createEncodedStreams`) that WebKit does not implement —
+so a WebKit-based wrapper can never support calls. Electron (Chromium) is the smallest engine that
+can. "Lightweight" here means *best-in-class for an Electron app* (single window, `arm64`-only
+build, `en`-only locales, latest Electron) — not Tauri-scale numbers. See
+[`docs/BUILD-NOTES.md`](docs/BUILD-NOTES.md) for real, measured disk/RAM footprint; we don't
+market unverified numbers.
 
----
+## Status: calls are wired but UNVERIFIED
 
-## Getting Started
+Camera/mic permissions, screen-share plumbing, and the entitlements needed for calls are all in
+place (see Architecture below), but end-to-end voice/video/screen-share have **not yet been
+confirmed working** in a real call. This is the project's calls gate — until
+[`docs/CALLS-RESULT.md`](docs/CALLS-RESULT.md) is filled in with a PASSED verdict from an actual
+test call, treat calls as unverified, not as a working feature.
 
-### Prerequisites
+## What works today
 
-This project is optimized for **macOS**. You should have [Homebrew](https://brew.sh/) installed.
+- Loads `https://www.messenger.com` directly in a secured, sandboxed window.
+- Persistent login (standard Chromium session storage — 2FA sessions survive restarts).
+- Native macOS dock badge showing unread count (read from the page title).
+- External links (anything outside Messenger/Facebook/fbcdn/fbsbx hosts) open in your default
+  browser instead of navigating the app window.
+- Downloads save to `~/Downloads`.
+- Camera/mic/screen-share permissions are granted only for Messenger's own requests; every other
+  permission request is denied by default.
 
-### 1. Environment Setup
+## Getting started
 
-If you don't have Rust installed, run the following commands to install it via `rustup`:
-
-```bash
-# Install rustup-init
-brew install rustup-init
-
-# Initialize Rust (select default options)
-rustup-init -y
-
-# Source the environment
-source "$HOME/.cargo/env"
-```
-
-Verify the installation:
-```bash
-rustc --version
-```
-
-### 2. Clone the Repository
-
-By default, we recommend cloning into your home folder to keep things organized:
+Requires Node.js and npm.
 
 ```bash
-cd ~
-git clone https://github.com/YOUR_USERNAME/messenger-tauri.git
-cd messenger-tauri
+npm install       # install dependencies
+npm start         # build + launch the app locally
+npm test          # run the test suite (vitest)
+npm run dist      # build a distributable macOS .dmg (see below)
 ```
 
-### 3. Install Project Dependencies
+## Building the macOS app
 
 ```bash
-npm install
+npm run dist
 ```
 
----
+This produces an arm64 `.dmg` under `release/` (via `electron-builder`). The build on this
+machine is **unsigned** (no Apple Developer ID identity available) — electron-builder falls back
+to an ad-hoc signature automatically. Because of this, macOS Gatekeeper will refuse to open the
+app normally on first launch: **right-click the app → Open**, then confirm in the dialog. You only
+need to do this once. See [`docs/BUILD-NOTES.md`](docs/BUILD-NOTES.md) for exact `.app`/`.dmg`
+sizes and the RAM footprint (filled in during a manual pass — not fabricated numbers).
 
-## Development & Usage
+## Architecture
 
-### Run in Debug Mode
-To launch the app for testing:
-```bash
-npm run tauri dev
-```
+The app is a thin shell: the window's URL is set to `messenger.com`, the browser process only
+handles window/permission/link plumbing, and a sandboxed preload script reports the unread count
+back to the app for the dock badge. See [`CLAUDE.md`](CLAUDE.md) for the file-by-file map and the
+security invariants that must not be weakened.
 
-### Build & Deploy (Recommended)
-We've included an automation script that closes any running instances, builds the app, and moves it to your `/Applications` folder.
-```bash
-npm run deploy
-```
+## Further reading
 
----
-
-## Building for macOS
-
-### Standard Build (Current Architecture)
-To create a production `.app` bundle for your current machine (e.g., Apple Silicon):
-```bash
-npm run tauri build
-```
-
-### Universal Build (Apple Silicon + Intel)
-To create a "Universal" binary that runs on both M-series and Intel-based Macs:
-
-1. **Add the required targets**:
-   ```bash
-   rustup target add aarch64-apple-darwin x86_64-apple-darwin
-   ```
-
-2. **Run the universal build**:
-   ```bash
-   npm run tauri build -- --target universal-apple-darwin
-   ```
-
-The resulting apps/DMGs will be found in `src-tauri/target/universal-apple-darwin/release/bundle/`.
-
----
-
-## Project Structure
-
-- `src-tauri/`: The Rust backend and configuration.
-- `src-tauri/capabilities/`: Security and permission settings.
-- `scripts/deploy.sh`: Deployment automation script.
-- `hybrid-logo.png`: The source premium icon.
-
----
-
-## Security & Privacy
-
-This app uses the system's native WebKit engine (Safari). It is configured with a strict User-Agent to ensure compatibility and a CSP that prevents any unauthorized external scripts from running within the webview.
+- [`docs/HANDOFF.md`](docs/HANDOFF.md) — full history of why this rebuild happened (Tauri →
+  Electron), what was researched and verified, and open questions.
+- [`docs/superpowers/`](docs/superpowers) — the design spec and implementation plan this app was
+  built from.
+- [`docs/CALLS-RESULT.md`](docs/CALLS-RESULT.md) — the empirical calls-gate evidence (see Status
+  above).
+- [`docs/BUILD-NOTES.md`](docs/BUILD-NOTES.md) — real, measured build footprint.
 
 ## License
 
