@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isExternalUrl, isHttpUrl } from "../src/main/links";
+import { isExternalUrl, isHttpUrl, decideWindowOpen } from "../src/main/links";
 
 describe("isExternalUrl", () => {
   it("keeps messenger.com internal", () => {
@@ -25,5 +25,26 @@ describe("isHttpUrl", () => {
   });
   it("rejects non-http schemes", () => {
     expect(isHttpUrl("javascript:void(0)")).toBe(false);
+  });
+});
+
+describe("decideWindowOpen", () => {
+  it("allows an about:blank call popup", () => {
+    expect(decideWindowOpen("about:blank", "")).toBe("allow");
+  });
+  it("allows an about:blank#blocked call popup", () => {
+    expect(decideWindowOpen("about:blank#blocked", "")).toBe("allow");
+  });
+  it("drops about:blank when frameName is also about:blank (Caprine's junk-popup exception)", () => {
+    expect(decideWindowOpen("about:blank", "about:blank")).toBe("drop");
+  });
+  it("allows internal messenger.com navigation", () => {
+    expect(decideWindowOpen("https://www.messenger.com/t/123", "")).toBe("allow");
+  });
+  it("opens external http(s) links externally", () => {
+    expect(decideWindowOpen("https://example.com/x", "")).toBe("open-external");
+  });
+  it("drops non-http external schemes", () => {
+    expect(decideWindowOpen("javascript:void(0)", "")).toBe("drop");
   });
 });

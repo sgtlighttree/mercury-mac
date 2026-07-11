@@ -19,3 +19,20 @@ export function isExternalUrl(rawUrl: string): boolean {
 export function isHttpUrl(rawUrl: string): boolean {
   return /^https?:/i.test(rawUrl);
 }
+
+export type WindowOpenDecision = "allow" | "open-external" | "drop";
+
+/**
+ * Decide how to handle a window.open / new-window request.
+ * about:blank popups are ALLOWED: messenger.com opens its voice/video call
+ * UI as an about:blank window it then navigates (see Caprine's identical
+ * special case). The popup inherits the parent's hardened webPreferences,
+ * and child navigations are guarded separately in index.ts.
+ */
+export function decideWindowOpen(rawUrl: string, frameName: string): WindowOpenDecision {
+  if ((rawUrl === "about:blank" || rawUrl === "about:blank#blocked") && frameName !== "about:blank") {
+    return "allow"; // voice/video call popup
+  }
+  if (!isExternalUrl(rawUrl)) return "allow";
+  return isHttpUrl(rawUrl) ? "open-external" : "drop";
+}

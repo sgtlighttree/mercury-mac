@@ -1,7 +1,7 @@
 import { app, BrowserWindow, shell, session, ipcMain, desktopCapturer } from "electron";
 import * as path from "path";
 import { TARGET_URL } from "./config";
-import { isExternalUrl, isHttpUrl } from "./links";
+import { isExternalUrl, isHttpUrl, decideWindowOpen } from "./links";
 import { IPC } from "../shared/channels";
 
 let mainWindow: BrowserWindow | null = null;
@@ -21,13 +21,14 @@ function createWindow(): void {
     },
   });
   const wc = mainWindow.webContents;
-  wc.setWindowOpenHandler(({ url }) => {
-    if (isExternalUrl(url)) {
-      if (isHttpUrl(url)) void shell.openExternal(url);
-      // non-http(s) schemes are dropped entirely
-      return { action: "deny" };
+  wc.setWindowOpenHandler(({ url, frameName }) => {
+    const decision = decideWindowOpen(url, frameName);
+    if (decision === "allow") return { action: "allow" };
+    if (decision === "open-external") void shell.openExternal(url);
+    else if (process.env.NODE_ENV !== "production") {
+      console.log("[window-open] dropped:", url);
     }
-    return { action: "allow" };
+    return { action: "deny" };
   });
   wc.on("will-navigate", (event, url) => {
     if (isExternalUrl(url)) {
@@ -35,6 +36,17 @@ function createWindow(): void {
       if (isHttpUrl(url)) void shell.openExternal(url);
       // non-http(s) schemes are dropped entirely
     }
+  });
+  // Allowed popups (the call window) inherit our webPreferences, but must
+  // also get the same navigation guard as the main window.
+  wc.on("did-create-window", (child) => {
+    child.webContents.on("will-navigate", (event, url) => {
+      // about:blank -> messenger call URL is the expected legit transition.
+      if (isExternalUrl(url)) {
+        event.preventDefault();
+        if (isHttpUrl(url)) void shell.openExternal(url);
+      }
+    });
   });
   mainWindow.loadURL(TARGET_URL);
   mainWindow.on("closed", () => {
@@ -77,7 +89,10 @@ function configureSession(): void {
 }
 
 app.whenReady().then(() => {
-  ipcMain.on(IPC.SET_UNREAD, (_event, count: number) => {
+  ipcMain.on(IPC.SET_UNREAD, (event, count: number) => {
+    // Only the main window's title carries the unread count; popup windows
+    // (e.g. the call window) inherit the preload and must not clobber the badge.
+    if (event.sender !== mainWindow?.webContents) return;
     if (typeof count === "number" && count >= 0) app.setBadgeCount(count);
   });
   configureSession();
