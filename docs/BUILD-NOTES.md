@@ -2,14 +2,28 @@
 
 - Electron: 43.1.0  electron-builder: 25.1.8
 - .app size: 282M   dmg size: 114M
-- Signing: No valid "Developer ID Application" identity is present on this machine (all
-  identities in the keychain are either untrusted or expired — see `electron-builder`
-  output). electron-builder skipped code signing with a Developer ID and instead produced
-  an ad-hoc signature (`codesign -dv` on `Messenger.app` reports `Signature=adhoc`,
-  `flags=0x20002(adhoc,linker-signed)`). This is expected for an unsigned local build; no
-  `CSC_IDENTITY_AUTO_DISCOVERY=false` override was actually needed — electron-builder fell
-  back to ad-hoc signing on its own once it determined no valid identity was usable. On
-  first launch, Gatekeeper will block the unsigned app; right-click → Open (or
-  `xattr -d com.apple.quarantine /Applications/Messenger.app` after copying it there) is
-  required once.
-- RAM (running, logged in): PENDING — filled during manual pass
+
+## Signing — REQUIRED, not optional (updated 2026-07-11)
+
+Build with the self-signed "Mercury Dev" identity (login keychain, trusted for code signing):
+
+```bash
+CSC_NAME="Mercury Dev" npm run dist
+```
+
+Why signing is mandatory here, learned the hard way:
+- **Ad-hoc builds cannot register with macOS Notification Center** — even main-process
+  notifications fail with `UNErrorDomain error 1` and the app never appears in System
+  Settings → Notifications.
+- **Ad-hoc signatures change every rebuild**, so TCC grants (mic/camera/screen) reset each
+  time; the stable Mercury Dev signature persists them.
+- Signing enables hardened runtime, which then **requires** the entitlements in
+  `build/entitlements.mac.plist`: `allow-jit`, `allow-unsigned-executable-memory`, and
+  crucially `disable-library-validation` — without the last one the app **crashes on
+  launch** ("different Team IDs" dyld abort), because a self-signed cert has no Team ID and
+  Library Validation refuses to load Electron Framework.
+
+Gatekeeper note: locally built dmgs carry no quarantine xattr, so no Gatekeeper prompt
+appears on this machine. The right-click → Open advice only applies to *downloaded* copies.
+
+- RAM (running, logged in): PENDING — measure via Activity Monitor when convenient

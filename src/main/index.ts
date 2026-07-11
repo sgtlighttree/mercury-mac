@@ -1,8 +1,22 @@
-import { app, BrowserWindow, shell, session, ipcMain, desktopCapturer, systemPreferences } from "electron";
+import {
+  app,
+  BrowserWindow,
+  Notification,
+  shell,
+  session,
+  ipcMain,
+  desktopCapturer,
+  systemPreferences,
+} from "electron";
 import * as path from "path";
 import { TARGET_URL } from "./config";
 import { isExternalUrl, isHttpUrl, decideWindowOpen } from "./links";
+import { loadWindowBounds, saveWindowBounds } from "./window-state";
 import { IPC } from "../shared/channels";
+
+// Use the product name for userData so dev (`npm start`) and the packaged app
+// share one storage dir: login session AND window geometry persist across both.
+app.setName("Messenger");
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -32,9 +46,9 @@ function wireNavigationGuards(wc: Electron.WebContents): void {
 }
 
 function createWindow(): void {
+  const stateFile = path.join(app.getPath("userData"), "window-state.json");
   mainWindow = new BrowserWindow({
-    width: 1000,
-    height: 800,
+    ...loadWindowBounds(stateFile),
     title: "Messenger",
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
@@ -47,6 +61,9 @@ function createWindow(): void {
   });
   wireNavigationGuards(mainWindow.webContents);
   mainWindow.loadURL(TARGET_URL);
+  mainWindow.on("close", () => {
+    if (mainWindow) saveWindowBounds(stateFile, mainWindow.getBounds());
+  });
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -86,14 +103,18 @@ function configureSession(): void {
       });
       return;
     }
-    callback(permission === "display-capture");
+    // "notifications" is required for messenger.com's web notifications to surface
+    // as native macOS notifications (M2 requirement) — without it the site sees
+    // "denied" and never posts. Everything else stays denied.
+    callback(permission === "display-capture" || permission === "notifications");
   });
   // Synchronous permission checks (navigator.permissions.query) must agree
   // with the request handler above, or the call UI may silently skip prompting.
   ses.setPermissionCheckHandler(
     // `permission: string`: Electron's check-handler type union omits "display-capture"
     // even though such checks occur at runtime; widening the param is type-safe.
-    (_wc, permission: string) => permission === "media" || permission === "display-capture",
+    (_wc, permission: string) =>
+      permission === "media" || permission === "display-capture" || permission === "notifications",
   );
   // Screen share: grant the primary screen. A source-picker UI is a later enhancement.
   // Requires the macOS Screen Recording permission (System Settings → Privacy).
@@ -114,11 +135,62 @@ function configureSession(): void {
 }
 
 app.whenReady().then(() => {
+  // Badge stabilizer: messenger.com "blinks" the title ((1) Messenger <-> Messenger)
+  // to grab attention, which would blink the dock badge too. Rises apply instantly;
+  // a drop to zero only clears after the title stays zero for a grace period, so a
+  // quick dock-peek during a blink never shows an empty badge over unread messages.
+  const BADGE_CLEAR_DELAY_MS = 2500;
+  let badgeClearTimer: NodeJS.Timeout | null = null;
   ipcMain.on(IPC.SET_UNREAD, (event, count: number) => {
     // Only the main window's title carries the unread count; popup windows
     // (e.g. the call window) inherit the preload and must not clobber the badge.
     if (event.sender !== mainWindow?.webContents) return;
-    if (typeof count === "number" && count >= 0) app.setBadgeCount(count);
+    if (typeof count !== "number" || count < 0) return;
+    if (count > 0) {
+      if (badgeClearTimer) {
+        clearTimeout(badgeClearTimer);
+        badgeClearTimer = null;
+      }
+      app.setBadgeCount(count);
+    } else if (!badgeClearTimer) {
+      badgeClearTimer = setTimeout(() => {
+        badgeClearTimer = null;
+        app.setBadgeCount(0);
+      }, BADGE_CLEAR_DELAY_MS);
+    }
+  });
+
+  // Show a native notification for a page-created web notification (see notification-inject).
+  // Retained in a Map until closed: Electron Notification objects are otherwise prone to
+  // premature GC, which silently kills their click/close callbacks (electron#16922).
+  const liveNotifications = new Map<number, Notification>();
+  ipcMain.on(IPC.NOTIFY, (event, data: { id: number; title?: string; body?: string }) => {
+    if (event.sender !== mainWindow?.webContents) return;
+    if (!Notification.isSupported()) return;
+    const n = new Notification({
+      title: data.title || "Messenger",
+      body: data.body || "",
+    });
+    liveNotifications.set(data.id, n);
+    n.on("click", () => {
+      mainWindow?.show();
+      mainWindow?.focus();
+      if (!event.sender.isDestroyed()) {
+        event.sender.send(IPC.NOTIFY_CALLBACK, { id: data.id, event: "click" });
+      }
+    });
+    n.on("close", () => {
+      liveNotifications.delete(data.id);
+      if (!event.sender.isDestroyed()) {
+        event.sender.send(IPC.NOTIFY_CALLBACK, { id: data.id, event: "close" });
+      }
+    });
+    n.show();
+  });
+  ipcMain.on(IPC.NOTIFY_CLOSE, (event, data: { id: number }) => {
+    if (event.sender !== mainWindow?.webContents) return;
+    liveNotifications.get(data.id)?.close();
+    liveNotifications.delete(data.id);
   });
   configureSession();
   createWindow();
