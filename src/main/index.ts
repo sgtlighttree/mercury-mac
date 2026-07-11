@@ -51,6 +51,13 @@ function configureSession(): void {
   ses.setPermissionRequestHandler((_wc, permission, callback) => {
     callback(permission === "media" || permission === "display-capture");
   });
+  // Synchronous permission checks (navigator.permissions.query) must agree
+  // with the request handler above, or the call UI may silently skip prompting.
+  ses.setPermissionCheckHandler(
+    // `permission: string`: Electron's check-handler type union omits "display-capture"
+    // even though such checks occur at runtime; widening the param is type-safe.
+    (_wc, permission: string) => permission === "media" || permission === "display-capture",
+  );
   // Screen share: grant the primary screen. A source-picker UI is a later enhancement.
   // Requires the macOS Screen Recording permission (System Settings → Privacy).
   ses.setDisplayMediaRequestHandler((_request, callback) => {
@@ -62,7 +69,10 @@ function configureSession(): void {
           callback({});
         }
       })
-      .catch(() => callback({}));
+      .catch((err) => {
+        console.error("display-media getSources failed:", err);
+        callback({});
+      });
   });
 }
 
