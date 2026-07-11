@@ -8,10 +8,13 @@ import {
   desktopCapturer,
   systemPreferences,
   nativeTheme,
+  Menu,
+  clipboard,
 } from "electron";
 import * as path from "path";
 import { TARGET_URL } from "./config";
 import { isExternalUrl, isHttpUrl, decideWindowOpen } from "./links";
+import { buildContextMenuTemplate } from "./context-menu";
 import { loadWindowBounds, saveWindowBounds } from "./window-state";
 import { createSplashWindow } from "./splash";
 import { IPC } from "../shared/channels";
@@ -60,7 +63,29 @@ function wireNavigationGuards(wc: Electron.WebContents): void {
   });
   wc.on("did-create-window", (child) => {
     wireNavigationGuards(child.webContents);
+    attachContextMenu(child.webContents);
     watchPopup(child);
+  });
+}
+
+/** Right-click menu (spelling suggestions, copy/paste, links, images) — Electron
+ *  shows none by default. Template logic lives in context-menu.ts (unit-tested);
+ *  this maps its injected actions onto real webContents/clipboard/shell calls. */
+function attachContextMenu(wc: Electron.WebContents): void {
+  wc.on("context-menu", (_event, params) => {
+    const template = buildContextMenuTemplate(params, {
+      replaceMisspelling: (word) => wc.replaceMisspelling(word),
+      addToDictionary: (word) => wc.session.addWordToSpellCheckerDictionary(word),
+      lookUpSelection: () => wc.showDefinitionForSelection(),
+      copyLink: (url) => clipboard.writeText(url),
+      openLinkExternal: (url) => void shell.openExternal(url),
+      copyImage: (x, y) => wc.copyImageAt(x, y),
+      saveImage: (url) => wc.downloadURL(url),
+    });
+    if (template.length === 0) return;
+    Menu.buildFromTemplate(template).popup({
+      window: BrowserWindow.fromWebContents(wc) ?? undefined,
+    });
   });
 }
 
@@ -109,6 +134,7 @@ function createWindow(): void {
     },
   });
   wireNavigationGuards(mainWindow.webContents);
+  attachContextMenu(mainWindow.webContents);
 
   const win = mainWindow;
   const splash = createSplashWindow(themeBackgroundColor());
