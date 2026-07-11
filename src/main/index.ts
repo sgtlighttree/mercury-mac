@@ -7,11 +7,13 @@ import {
   ipcMain,
   desktopCapturer,
   systemPreferences,
+  nativeTheme,
 } from "electron";
 import * as path from "path";
 import { TARGET_URL } from "./config";
 import { isExternalUrl, isHttpUrl, decideWindowOpen } from "./links";
 import { loadWindowBounds, saveWindowBounds } from "./window-state";
+import { createSplashWindow } from "./splash";
 import { IPC } from "../shared/channels";
 
 // Use the product name for userData so dev (`npm start`) and the packaged app
@@ -20,12 +22,28 @@ app.setName("Messenger");
 
 let mainWindow: BrowserWindow | null = null;
 
+/** Window background before the page paints — match the OS theme so pre-load
+ *  frames never flash white in dark mode. #1c1c1d ≈ Messenger's dark surface. */
+function themeBackgroundColor(): string {
+  return nativeTheme.shouldUseDarkColors ? "#1c1c1d" : "#ffffff";
+}
+
 /** Attach the window-open + navigation guards to a webContents, recursively
  *  covering any child windows it opens (e.g. the call popup). */
 function wireNavigationGuards(wc: Electron.WebContents): void {
   wc.setWindowOpenHandler(({ url, frameName }) => {
     const decision = decideWindowOpen(url, frameName);
-    if (decision === "allow") return { action: "allow" };
+    if (decision === "allow") {
+      // EVERY allowed popup is created HIDDEN — download popups (about:blank in
+      // 1:1 chats, real fbcdn/fbsbx URLs in group chats) never commit a
+      // navigation and are destroyed by will-download without ever flashing;
+      // real windows (the call popup) are revealed by watchPopup on their first
+      // committed navigation.
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: { show: false, backgroundColor: themeBackgroundColor() },
+      };
+    }
     if (decision === "open-external") void shell.openExternal(url);
     else if (process.env.NODE_ENV !== "production") {
       console.log("[window-open] dropped:", url);
@@ -42,14 +60,45 @@ function wireNavigationGuards(wc: Electron.WebContents): void {
   });
   wc.on("did-create-window", (child) => {
     wireNavigationGuards(child.webContents);
+    watchPopup(child);
   });
 }
+
+// A hidden popup resolves one of three ways: it commits a real URL (the
+// voice/video call window — reveal it and bring the app forward), its navigation
+// becomes a download (will-download destroys it, unseen), or neither — then the
+// fallback shows it anyway so an unanticipated popup type is never leaked hidden.
+const POPUP_REVEAL_FALLBACK_MS = 5000;
+function watchPopup(child: BrowserWindow): void {
+  const onNavigate = (_event: unknown, url: string): void => {
+    if (!isHttpUrl(url) || child.isDestroyed()) return;
+    child.webContents.off("did-navigate", onNavigate);
+    if (!child.isVisible()) child.show();
+    // An incoming ring must grab attention (Matt's note: calls should steal
+    // focus) — bring the app forward even if another app is frontmost.
+    app.focus({ steal: true });
+    child.focus();
+  };
+  child.webContents.on("did-navigate", onNavigate);
+  const fallback = setTimeout(() => {
+    if (!child.isDestroyed() && !child.isVisible()) child.show();
+  }, POPUP_REVEAL_FALLBACK_MS);
+  child.on("closed", () => clearTimeout(fallback));
+}
+
+// Cap on how long the splash may cover a hidden main window if neither
+// did-finish-load nor did-fail-load ever fires (belt and braces).
+const SPLASH_MAX_MS = 15000;
 
 function createWindow(): void {
   const stateFile = path.join(app.getPath("userData"), "window-state.json");
   mainWindow = new BrowserWindow({
     ...loadWindowBounds(stateFile),
     title: "Messenger",
+    // Hidden until messenger.com finishes loading; a native theme-aware splash
+    // window covers the load so dark mode never sees the white boot flash.
+    show: false,
+    backgroundColor: themeBackgroundColor(),
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -60,6 +109,25 @@ function createWindow(): void {
     },
   });
   wireNavigationGuards(mainWindow.webContents);
+
+  const win = mainWindow;
+  const splash = createSplashWindow(themeBackgroundColor());
+  let revealTimer: NodeJS.Timeout | null = null;
+  let revealed = false;
+  const reveal = (): void => {
+    if (revealed) return;
+    revealed = true;
+    if (revealTimer) clearTimeout(revealTimer);
+    if (!win.isDestroyed()) win.show();
+    if (!splash.isDestroyed()) splash.destroy();
+  };
+  // Reveal on success or failure (offline must show the window, not a stuck splash).
+  win.webContents.once("did-finish-load", reveal);
+  win.webContents.once("did-fail-load", reveal);
+  // Splash killed early (Cmd+W) must not strand a hidden main window.
+  splash.on("closed", reveal);
+  revealTimer = setTimeout(reveal, SPLASH_MAX_MS);
+
   mainWindow.loadURL(TARGET_URL);
   mainWindow.on("close", () => {
     if (mainWindow) saveWindowBounds(stateFile, mainWindow.getBounds());
@@ -71,8 +139,19 @@ function createWindow(): void {
 
 function configureSession(): void {
   const ses = session.defaultSession;
-  ses.on("will-download", (_event, item) => {
+  ses.on("will-download", (_event, item, webContents) => {
     item.setSavePath(path.join(app.getPath("downloads"), path.basename(item.getFilename())));
+    // Bounce the Downloads dock stack on completion, like a real browser does.
+    item.once("done", (_e, state) => {
+      if (state === "completed") app.dock?.downloadFinished(item.getSavePath());
+    });
+    // Attachment downloads arrive via a popup whose navigation *became* the
+    // download (so it never commits a URL); destroy it (it was created hidden —
+    // see watchPopup) instead of leaving a blank white window behind.
+    const win = BrowserWindow.fromWebContents(webContents);
+    if (win && win !== mainWindow && !isHttpUrl(webContents.getURL())) {
+      win.destroy();
+    }
   });
   // Grant only media (camera/mic) and screen capture; deny all other permissions.
   // For media, first ensure macOS-level (TCC) access: Electron does not reliably
@@ -158,6 +237,16 @@ app.whenReady().then(() => {
         app.setBadgeCount(0);
       }, BADGE_CLEAR_DELAY_MS);
     }
+  });
+
+  // Incoming call ringing (detected from the page title by the preload): bring
+  // the app to the foreground even if another app is frontmost — the ring UI is
+  // an in-page dialog, so without this the ring is easy to miss entirely.
+  ipcMain.on(IPC.INCOMING_CALL, (event) => {
+    if (event.sender !== mainWindow?.webContents) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    app.focus({ steal: true });
   });
 
   // Show a native notification for a page-created web notification (see notification-inject).

@@ -5,4 +5,6 @@ export const IPC = {
   NOTIFY_CLOSE: "notify-close",
   // Main -> renderer (via preload): a native notification fired an event (click/close).
   NOTIFY_CALLBACK: "notify-callback",
+  // Renderer (via preload) -> main: the page title says a call is ringing ("X is calling").
+  INCOMING_CALL: "incoming-call",
 } as const;

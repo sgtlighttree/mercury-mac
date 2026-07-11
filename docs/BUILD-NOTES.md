@@ -26,4 +26,8 @@ Why signing is mandatory here, learned the hard way:
 Gatekeeper note: locally built dmgs carry no quarantine xattr, so no Gatekeeper prompt
 appears on this machine. The right-click → Open advice only applies to *downloaded* copies.
 
-- RAM (running, logged in): PENDING — measure via Activity Monitor when convenient
+- RAM (running, logged in): **~635MB average** across the Messenger processes (measured by
+  Matt via Activity Monitor, 2026-07-12, packaged app). Within the honest expectation: the
+  site, not the shell, dominates.
+- On-disk profile (userData) after ~2 days of use: **~426MB** — breakdown and paths in
+  `ARCHITECTURE.md` (§ Where the app stores its data).

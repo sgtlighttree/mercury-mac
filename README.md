@@ -15,13 +15,15 @@ build, `en`-only locales, latest Electron) — not Tauri-scale numbers. See
 [`docs/BUILD-NOTES.md`](docs/BUILD-NOTES.md) for real, measured disk/RAM footprint; we don't
 market unverified numbers.
 
-## Status: calls are wired but UNVERIFIED
+## Status: calls verified working
 
-Camera/mic permissions, screen-share plumbing, and the entitlements needed for calls are all in
-place (see Architecture below), but end-to-end voice/video/screen-share have **not yet been
-confirmed working** in a real call. This is the project's calls gate — until
-[`docs/CALLS-RESULT.md`](docs/CALLS-RESULT.md) is filled in with a PASSED verdict from an actual
-test call, treat calls as unverified, not as a working feature.
+Voice and video calls work **bidirectionally** (made and received), in both dev (`npm start`)
+and packaged builds, and in-call screen share works (whole screen only). The calls gate
+**PASSED** on 2026-07-11 — full evidence and the root-cause trail in
+[`docs/CALLS-RESULT.md`](docs/CALLS-RESULT.md). Known limitation: desktop notifications can't be
+delivered (messenger.com uses Web Push, which Electron cannot receive) — the dock badge + in-page
+sound are the supported signal; see the Notifications section of
+[`docs/HANDOFF.md`](docs/HANDOFF.md).
 
 ## What works today
 
@@ -39,31 +41,46 @@ test call, treat calls as unverified, not as a working feature.
 Requires Node.js and npm.
 
 ```bash
-npm install       # install dependencies
-npm start         # build + launch the app locally
-npm test          # run the test suite (vitest)
-npm run dist      # build a distributable macOS .dmg (see below)
+npm install                          # install dependencies
+npm start                            # build + launch the app locally
+npm test                             # run the test suite (vitest)
+CSC_NAME="Mercury Dev" npm run dist  # build a signed macOS .dmg (see below)
 ```
 
 ## Building the macOS app
 
 ```bash
-npm run dist
+CSC_NAME="Mercury Dev" npm run dist
 ```
 
-This produces an arm64 `.dmg` under `release/` (via `electron-builder`). The build on this
-machine is **unsigned** (no Apple Developer ID identity available) — electron-builder falls back
-to an ad-hoc signature automatically. Because of this, macOS Gatekeeper will refuse to open the
-app normally on first launch: **right-click the app → Open**, then confirm in the dialog. You only
-need to do this once. See [`docs/BUILD-NOTES.md`](docs/BUILD-NOTES.md) for exact `.app`/`.dmg`
-sizes and the RAM footprint (filled in during a manual pass — not fabricated numbers).
+This produces a signed arm64 `.dmg` under `release/` (via `electron-builder`). **Signing with a
+stable identity is required** — here a self-signed "Mercury Dev" certificate in the login
+keychain (no Apple Developer ID needed). A plain `npm run dist` falls back to an ad-hoc
+signature, which launches but cannot register for notifications and resets the TCC
+(camera/mic/screen) permission grants on every rebuild — don't use it. See
+[`docs/BUILD-NOTES.md`](docs/BUILD-NOTES.md) for exact `.app`/`.dmg` sizes and the RAM footprint
+(filled in during a manual pass — not fabricated numbers).
+
+### Faster builds while iterating: skip the .dmg
+
+Most of `npm run dist`'s wall time is the single-threaded `.dmg` compression (plus a
+timestamp-server round-trip per signed binary). When you just want the app itself:
+
+```bash
+npm run build && CSC_NAME="Mercury Dev" npx electron-builder --mac dir
+```
+
+This produces `release/mac-arm64/Messenger.app` directly — signed and launchable — which you can
+copy straight to `/Applications`. Build the `.dmg` only when you want a distributable artifact.
 
 ## Architecture
 
 The app is a thin shell: the window's URL is set to `messenger.com`, the browser process only
 handles window/permission/link plumbing, and a sandboxed preload script reports the unread count
-back to the app for the dock badge. See [`CLAUDE.md`](CLAUDE.md) for the file-by-file map and the
-security invariants that must not be weakened.
+back to the app for the dock badge. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the process
+model, runtime data/storage locations (profile dir, IndexedDB/cache, what's safe to delete), and
+footprint; see [`CLAUDE.md`](CLAUDE.md) for the file-by-file source map and the security
+invariants that must not be weakened.
 
 ## Further reading
 

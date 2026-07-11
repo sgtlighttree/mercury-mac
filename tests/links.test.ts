@@ -29,10 +29,10 @@ describe("isHttpUrl", () => {
 });
 
 describe("decideWindowOpen", () => {
-  it("allows an about:blank call popup", () => {
+  it("allows an about:blank call/download popup", () => {
     expect(decideWindowOpen("about:blank", "")).toBe("allow");
   });
-  it("allows an about:blank#blocked call popup", () => {
+  it("allows an about:blank#blocked call/download popup", () => {
     expect(decideWindowOpen("about:blank#blocked", "")).toBe("allow");
   });
   it("drops about:blank when frameName is also about:blank (Caprine's junk-popup exception)", () => {

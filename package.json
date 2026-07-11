@@ -29,6 +29,7 @@
     },
     "mac": {
       "target": [{ "target": "dmg", "arch": ["arm64"] }],
+      "timestamp": "none",
       "category": "public.app-category.social-networking",
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
