@@ -6,6 +6,31 @@ import { IPC } from "../shared/channels";
 
 let mainWindow: BrowserWindow | null = null;
 
+/** Attach the window-open + navigation guards to a webContents, recursively
+ *  covering any child windows it opens (e.g. the call popup). */
+function wireNavigationGuards(wc: Electron.WebContents): void {
+  wc.setWindowOpenHandler(({ url, frameName }) => {
+    const decision = decideWindowOpen(url, frameName);
+    if (decision === "allow") return { action: "allow" };
+    if (decision === "open-external") void shell.openExternal(url);
+    else if (process.env.NODE_ENV !== "production") {
+      console.log("[window-open] dropped:", url);
+    }
+    return { action: "deny" };
+  });
+  wc.on("will-navigate", (event, url) => {
+    // For popups, about:blank -> messenger call URL is the expected legit transition.
+    if (isExternalUrl(url)) {
+      event.preventDefault();
+      if (isHttpUrl(url)) void shell.openExternal(url);
+      // non-http(s) schemes are dropped entirely
+    }
+  });
+  wc.on("did-create-window", (child) => {
+    wireNavigationGuards(child.webContents);
+  });
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1000,
@@ -20,34 +45,7 @@ function createWindow(): void {
       sandbox: true,
     },
   });
-  const wc = mainWindow.webContents;
-  wc.setWindowOpenHandler(({ url, frameName }) => {
-    const decision = decideWindowOpen(url, frameName);
-    if (decision === "allow") return { action: "allow" };
-    if (decision === "open-external") void shell.openExternal(url);
-    else if (process.env.NODE_ENV !== "production") {
-      console.log("[window-open] dropped:", url);
-    }
-    return { action: "deny" };
-  });
-  wc.on("will-navigate", (event, url) => {
-    if (isExternalUrl(url)) {
-      event.preventDefault();
-      if (isHttpUrl(url)) void shell.openExternal(url);
-      // non-http(s) schemes are dropped entirely
-    }
-  });
-  // Allowed popups (the call window) inherit our webPreferences, but must
-  // also get the same navigation guard as the main window.
-  wc.on("did-create-window", (child) => {
-    child.webContents.on("will-navigate", (event, url) => {
-      // about:blank -> messenger call URL is the expected legit transition.
-      if (isExternalUrl(url)) {
-        event.preventDefault();
-        if (isHttpUrl(url)) void shell.openExternal(url);
-      }
-    });
-  });
+  wireNavigationGuards(mainWindow.webContents);
   mainWindow.loadURL(TARGET_URL);
   mainWindow.on("closed", () => {
     mainWindow = null;
