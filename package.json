@@ -8,9 +8,9 @@
   "main": "dist/main/index.js",
   "scripts": {
     "build": "tsc && esbuild src/preload/index.ts --bundle --outfile=dist/preload/index.js --external:electron --format=cjs --platform=browser",
-    "start": "npm run build && electron .",
+    "start": "pnpm run build && electron .",
     "test": "vitest run",
-    "dist": "npm run build && electron-builder --mac"
+    "dist": "pnpm run build && electron-builder --mac"
   },
   "devDependencies": {
     "electron": "^43.1.0",
