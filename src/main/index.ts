@@ -17,6 +17,7 @@ import { isExternalUrl, isHttpUrl, decideWindowOpen } from "./links";
 import { buildContextMenuTemplate } from "./context-menu";
 import { loadWindowBounds, saveWindowBounds } from "./window-state";
 import { createSplashWindow } from "./splash";
+import { notificationKey } from "./notifications";
 import { IPC } from "../shared/channels";
 
 // Use the product name for userData so dev (`npm start`) and the packaged app
@@ -55,6 +56,9 @@ function wireNavigationGuards(wc: Electron.WebContents): void {
   });
   wc.on("will-navigate", (event, url) => {
     // For popups, about:blank -> messenger call URL is the expected legit transition.
+    // Observed 2026-07-27: the call popup navigates to
+    // `https://www.messenger.com/groupcall/ROOM:<id>/?...&is_e2ee_mandated=true` — a
+    // messenger.com host, which is why POPUP_EXTERNAL_HOSTS (facebook.com) cannot touch calls.
     if (isExternalUrl(url)) {
       event.preventDefault();
       if (isHttpUrl(url)) void shell.openExternal(url);
@@ -278,15 +282,16 @@ app.whenReady().then(() => {
   // Show a native notification for a page-created web notification (see notification-inject).
   // Retained in a Map until closed: Electron Notification objects are otherwise prone to
   // premature GC, which silently kills their click/close callbacks (electron#16922).
-  const liveNotifications = new Map<number, Notification>();
+  const liveNotifications = new Map<string, Notification>();
   ipcMain.on(IPC.NOTIFY, (event, data: { id: number; title?: string; body?: string }) => {
     if (event.sender !== mainWindow?.webContents) return;
     if (!Notification.isSupported()) return;
+    const key = notificationKey(event.sender.id, data.id);
     const n = new Notification({
       title: data.title || "Messenger",
       body: data.body || "",
     });
-    liveNotifications.set(data.id, n);
+    liveNotifications.set(key, n);
     n.on("click", () => {
       mainWindow?.show();
       mainWindow?.focus();
@@ -295,7 +300,7 @@ app.whenReady().then(() => {
       }
     });
     n.on("close", () => {
-      liveNotifications.delete(data.id);
+      liveNotifications.delete(key);
       if (!event.sender.isDestroyed()) {
         event.sender.send(IPC.NOTIFY_CALLBACK, { id: data.id, event: "close" });
       }
@@ -304,8 +309,9 @@ app.whenReady().then(() => {
   });
   ipcMain.on(IPC.NOTIFY_CLOSE, (event, data: { id: number }) => {
     if (event.sender !== mainWindow?.webContents) return;
-    liveNotifications.get(data.id)?.close();
-    liveNotifications.delete(data.id);
+    const key = notificationKey(event.sender.id, data.id);
+    liveNotifications.get(key)?.close();
+    liveNotifications.delete(key);
   });
   configureSession();
   createWindow();
