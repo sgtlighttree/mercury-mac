@@ -51,8 +51,7 @@
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
         "NSCameraUsageDescription": "Messenger uses your camera for video calls.",
-        "NSMicrophoneUsageDescription": "Messenger uses your microphone for calls.",
-        "NSAppTransportSecurity": { "NSAllowsArbitraryLoads": false }
+        "NSMicrophoneUsageDescription": "Messenger uses your microphone for calls."
       }
     }
   }
