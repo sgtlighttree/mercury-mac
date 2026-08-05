@@ -1,14 +1,34 @@
 # Build Notes (v0.1.0 MVP)
 
-- Electron: 43.1.0  electron-builder: 25.1.8
-- .app size: 282M   dmg size: 114M
+- Electron: 43.3.0  electron-builder: 25.1.8
+- .app size: 275M (2026-08-05 rebuild, `--mac dir`)   dmg size: 114M
+
+## Security hardening (2026-08-05)
+
+- **Electron 43.3.0** (was 43.1.0): fixes CVE-2026-54257 / the Apple Silicon UTF-8 bug — an LLVM
+  miscompile (ThinLTO on M-family CPUs) that silently truncates `TextEncoder.encode()` /
+  `Buffer.byteLength` for non-ASCII strings and crashes `fs.writeFileSync`. Fixed in 42.3.3,
+  backported to the 43 line only in 43.3.0. Messenger's in-page crypto runs TextEncoder, so this
+  was an integrity risk on the M1.
+- **Electron fuses hardened** in `scripts/after-pack.cjs` (an electron-builder `afterPack` hook,
+  runs before signing so the signature covers the change): `RunAsNode`, 
+  `EnableNodeOptionsEnvironmentVariable`, and `EnableNodeCliInspectArguments` are all DISABLED —
+  `ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS`, and `--inspect` become inert in the packaged app.
+- **`NSAllowsArbitraryLoads=false`** forced via the same hook: electron-builder hardcodes it to
+  `true` and `extendInfo` cannot override it (`configureLocalhostAts`). Inert for Chromium's
+  network stack, but keeps any NSURLSession-based code on ATS defaults.
+- **`pnpm run build`** now does `rm -rf dist` + full typecheck (`tsc --noEmit`) + emit of only
+  the files main requires (`tsc -p tsconfig.build.json`, excludes `src/preload/`) + the esbuild
+  preload bundle. No dead/duplicate files ship in the asar.
+- `app.isPackaged` replaces the `NODE_ENV !== "production"` guard for dev-only console logging
+  (NODE_ENV is unset in packaged builds).
 
 ## Signing — REQUIRED, not optional (updated 2026-07-11)
 
 Build with the self-signed "Mercury Dev" identity (login keychain, trusted for code signing):
 
 ```bash
-CSC_NAME="Mercury Dev" npm run dist
+CSC_NAME="Mercury Dev" pnpm run dist
 ```
 
 Why signing is mandatory here, learned the hard way:
