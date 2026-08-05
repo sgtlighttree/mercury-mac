@@ -49,7 +49,7 @@ function wireNavigationGuards(wc: Electron.WebContents): void {
       };
     }
     if (decision === "open-external") void shell.openExternal(url);
-    else if (process.env.NODE_ENV !== "production") {
+    else if (!app.isPackaged) {
       console.log("[window-open] dropped:", url);
     }
     return { action: "deny" };
