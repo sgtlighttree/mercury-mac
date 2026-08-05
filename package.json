@@ -14,6 +14,7 @@
     "dist": "pnpm run build && electron-builder --mac"
   },
   "devDependencies": {
+    "@electron/fuses": "^2.1.3",
     "electron": "^43.3.0",
     "electron-builder": "^25.0.0",
     "esbuild": "^0.24.0",
@@ -23,13 +24,26 @@
   "build": {
     "appId": "com.mercury.messenger",
     "productName": "Messenger",
-    "electronLanguages": ["en"],
-    "files": ["dist/**/*", "package.json"],
+    "electronLanguages": [
+      "en"
+    ],
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
     "directories": {
       "output": "release"
     },
+    "afterPack": "scripts/after-pack.cjs",
     "mac": {
-      "target": [{ "target": "dmg", "arch": ["arm64"] }],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
       "timestamp": "none",
       "category": "public.app-category.social-networking",
       "hardenedRuntime": true,
