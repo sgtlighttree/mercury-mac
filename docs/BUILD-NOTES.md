@@ -2,6 +2,8 @@
 
 - Electron: 43.3.0  electron-builder: 25.1.8
 - .app size: 275M (2026-08-05 rebuild, `--mac dir`)   dmg size: 114M
+- **Calls gate re-passed on the hardened build** (2026-08-05): installed the signed dmg,
+  voice+video calls + screen share verified working after the fuses/ATS/Electron changes.
 
 ## Security hardening (2026-08-05)
 
