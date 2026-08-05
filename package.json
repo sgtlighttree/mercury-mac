@@ -8,7 +8,7 @@
   "main": "dist/main/index.js",
   "packageManager": "pnpm@11.17.0",
   "scripts": {
-    "build": "tsc && esbuild src/preload/index.ts --bundle --outfile=dist/preload/index.js --external:electron --format=cjs --platform=browser",
+    "build": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\" && tsc --noEmit && tsc -p tsconfig.build.json && esbuild src/preload/index.ts --bundle --outfile=dist/preload/index.js --external:electron --format=cjs --platform=browser",
     "start": "pnpm run build && electron .",
     "test": "vitest run",
     "dist": "pnpm run build && electron-builder --mac"
