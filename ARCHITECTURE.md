@@ -2,7 +2,7 @@
 
 How the app is put together at runtime, and — because this is easy to lose track of with a
 web wrapper — exactly where it puts its data on disk. For the file-by-file source map and the
-security invariants, see [`CLAUDE.md`](CLAUDE.md); for build/signing facts, see
+security invariants, see [`AGENTS.md`](AGENTS.md); for build/signing facts, see
 [`docs/BUILD-NOTES.md`](docs/BUILD-NOTES.md).
 
 ## Process model
@@ -34,7 +34,7 @@ Everything lives in one Chromium profile directory ("userData"):
 ```
 
 The name comes from `app.setName("Messenger")` in `src/main/index.ts` — set explicitly so
-`npm start` (dev) and the packaged app share ONE profile: login session, window geometry, and
+`pnpm start` (dev) and the packaged app share ONE profile: login session, window geometry, and
 caches persist across both. Observed layout (sizes from 2026-07-12, ~2 days of daily use,
 ~426MB total):
 
@@ -61,8 +61,13 @@ Practical consequences:
 - macOS permission (TCC) grants — mic/camera/screen — are keyed to the app's **code
   signature**, not to this directory; that's why builds must be signed with the stable
   "Mercury Dev" cert (`docs/BUILD-NOTES.md`).
-- `~/Library/Caches/electron/` (~116M) is **not the app** — it's the Electron zip cache npm
-  uses on this dev machine. `~/Library/Caches/com.messenger.tauri/` (~7M) is a leftover from
+- Dev runs (`pnpm start`) inherit the **launcher's** TCC identity (VS Code / Terminal), so
+  mic/camera grants land on that app rather than on Messenger. The packaged app has its own
+  identity — verify permission behavior against the packaged build, not the dev run. (This was
+  one of the three stacked root causes behind the original calls failure; see
+  `docs/CALLS-RESULT.md`.)
+- `~/Library/Caches/electron/` (~116M) is **not the app** — it's the Electron zip cache the
+  package manager uses on this dev machine. `~/Library/Caches/com.messenger.tauri/` (~7M) is a leftover from
   the abandoned Tauri prototype and can be deleted.
 
 ## Runtime footprint
@@ -75,5 +80,5 @@ in `docs/HANDOFF.md` and the measured build sizes in `docs/BUILD-NOTES.md`.
 
 The packaged app currently ships Electron's default icon. To brand it: put a **1024×1024 PNG
 at `build/icon.png`** — electron-builder picks it up automatically and generates the `.icns`
-(alternatively provide a ready-made `build/icon.icns`). The dev run (`npm start`) keeps the
+(alternatively provide a ready-made `build/icon.icns`). The dev run (`pnpm start`) keeps the
 default Electron dock icon unless `app.dock.setIcon(...)` is wired for non-packaged runs.
