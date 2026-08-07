@@ -24,18 +24,17 @@ the calls regression check in `docs/MANUAL-TESTS.md` §9 must be re-run after su
 
 ## Commands
 
-- `pnpm install` — **pnpm only. Never `npm` or `yarn`**: `npm install` regenerates a
-  `package-lock.json` that conflicts with `pnpm-lock.yaml`. CI installs with `--frozen-lockfile`.
-- `pnpm start` — `pnpm run build && electron .` — build + launch the app locally.
-- `pnpm test` — vitest across 5 files in `tests/` covering the pure-logic modules (table below).
-- `pnpm run build` — `tsc` (strict typecheck) + esbuild preload bundle into
+- `npm install` — classic npm. `package-lock.json` is the lockfile. CI installs with `npm ci`.
+- `npm start` — `npm run build && electron .` — build + launch the app locally.
+- `npm test` — vitest across 5 files in `tests/` covering the pure-logic modules (table below).
+- `npm run build` — `tsc` (strict typecheck) + esbuild preload bundle into
   `dist/preload/index.js`. **This is the typecheck; there is no separate lint script.** CI runs
-  exactly `pnpm install --frozen-lockfile && pnpm run build && pnpm test`.
-- `CSC_NAME="Mercury Dev" pnpm run dist` — signed arm64 `.dmg` in `release/`. **`CSC_NAME` is
+  exactly `npm ci && npm run build && npm test`.
+- `CSC_NAME="Mercury Dev" npm run dist` — signed arm64 `.dmg` in `release/`. **`CSC_NAME` is
   required**: ad-hoc signing can't register notifications and resets TCC (camera/mic/screen)
   grants every rebuild (see Packaging).
-- Fast packaged build while iterating (skip the slow single-threaded .dmg): `pnpm run build &&
-  CSC_NAME="Mercury Dev" pnpm exec electron-builder --mac dir` →
+- Fast packaged build while iterating (skip the slow single-threaded .dmg): `npm run build &&
+  CSC_NAME="Mercury Dev" npx electron-builder --mac dir` →
   `release/mac-arm64/Messenger.app`.
 
 **Notifications are a known, evidence-backed limitation** — messenger.com posts them via Web Push,
@@ -109,7 +108,7 @@ The page is remote, untrusted content (messenger.com), so the app is deliberatel
 
 ## Testing
 
-`pnpm test` runs `vitest` across 5 test files:
+`npm test` runs `vitest` across 5 test files:
 
 | Test file | Covers |
 |---|---|
@@ -127,7 +126,7 @@ exercised manually via `docs/MANUAL-TESTS.md`.
 
 ## Packaging
 
-`pnpm run dist` uses `electron-builder` (config in `package.json`'s `"build"` block) to produce an
+`npm run dist` uses `electron-builder` (config in `package.json`'s `"build"` block) to produce an
 arm64-only, `en`-locale-only `.dmg` in `release/` — `directories.output` is `release`, *not*
 `dist`, because `dist` is also the TypeScript/esbuild build-output directory; electron-builder's
 `files` glob would otherwise recursively bundle its own previous output into the asar.
@@ -146,7 +145,7 @@ signing, which loses both properties. Real measured `.app`/`.dmg` sizes and RAM 
   packaged runs (`app.setName("Messenger")` in `src/main/index.ts`). Deleting it logs you out
   (session cookies) and clears the message cache (IndexedDB); it's recreated cleanly on next
   launch. Full layout in `ARCHITECTURE.md`.
-- Dev runs (`pnpm start`) inherit the **launcher's** TCC identity, so mic/camera/screen behavior
+- Dev runs (`npm start`) inherit the **launcher's** TCC identity, so mic/camera/screen behavior
   must be verified against the packaged build, not the dev run.
 
 ## Docs
@@ -155,8 +154,8 @@ signing, which loses both properties. Real measured `.app`/`.dmg` sizes and RAM 
 - `ARCHITECTURE.md` — process model, runtime data/storage layout, footprint.
 - `docs/HANDOFF.md` — research trail, decisions, and open questions (update it as you work).
 - **Historical/dated docs are frozen.** `docs/CALLS-RESULT.md`, dated sections of
-  `docs/HANDOFF.md`, everything under `docs/superpowers/` and `.superpowers/sdd/` still say `npm`
-  and the old repo name **on purpose** — they record what actually ran at the time, and rewriting
-  them would falsify the evidence trail. Don't "fix" them; only live docs (`README.md`,
-  `ARCHITECTURE.md`, `docs/BUILD-NOTES.md`, `docs/MANUAL-TESTS.md`, and the "Notes for Matt"
-  section of `docs/HANDOFF.md`) should say `pnpm`.
+  `docs/HANDOFF.md`, and everything under `docs/superpowers/` and `.superpowers/sdd/` record the
+  commands and repo name that actually ran at the time **on purpose** — rewriting them would
+  falsify the evidence trail. Don't "fix" them; keep tooling/command updates to the live docs
+  (`README.md`, `ARCHITECTURE.md`, `docs/BUILD-NOTES.md`, `docs/MANUAL-TESTS.md`, and the "Notes
+  for Matt" section of `docs/HANDOFF.md`).

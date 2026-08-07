@@ -19,7 +19,7 @@
 - **`NSAllowsArbitraryLoads=false`** forced via the same hook: electron-builder hardcodes it to
   `true` and `extendInfo` cannot override it (`configureLocalhostAts`). Inert for Chromium's
   network stack, but keeps any NSURLSession-based code on ATS defaults.
-- **`pnpm run build`** now does `rm -rf dist` + full typecheck (`tsc --noEmit`) + emit of only
+- **`npm run build`** now does `rm -rf dist` + full typecheck (`tsc --noEmit`) + emit of only
   the files main requires (`tsc -p tsconfig.build.json`, excludes `src/preload/`) + the esbuild
   preload bundle. No dead/duplicate files ship in the asar.
 - `app.isPackaged` replaces the `NODE_ENV !== "production"` guard for dev-only console logging
@@ -30,7 +30,7 @@
 Build with the self-signed "Mercury Dev" identity (login keychain, trusted for code signing):
 
 ```bash
-CSC_NAME="Mercury Dev" pnpm run dist
+CSC_NAME="Mercury Dev" npm run dist
 ```
 
 Why signing is mandatory here, learned the hard way:

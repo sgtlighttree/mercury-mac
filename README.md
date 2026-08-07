@@ -17,7 +17,7 @@ market unverified numbers.
 
 ## Status: calls verified working
 
-Voice and video calls work **bidirectionally** (made and received), in both dev (`pnpm start`)
+Voice and video calls work **bidirectionally** (made and received), in both dev (`npm start`)
 and packaged builds, and in-call screen share works (whole screen only). The calls gate
 **PASSED** on 2026-07-11 — full evidence and the root-cause trail in
 [`docs/CALLS-RESULT.md`](docs/CALLS-RESULT.md). Known limitation: desktop notifications can't be
@@ -38,28 +38,27 @@ sound are the supported signal; see the Notifications section of
 
 ## Getting started
 
-Requires Node.js and [pnpm](https://pnpm.io).
+Requires Node.js and npm.
 
 ```bash
-pnpm install                          # install dependencies
-pnpm start                            # build + launch the app locally
-pnpm test                             # run the test suite (vitest)
-CSC_NAME="Mercury Dev" pnpm run dist  # build a signed macOS .dmg (see below)
+npm install                          # install dependencies
+npm start                            # build + launch the app locally
+npm test                             # run the test suite (vitest)
+CSC_NAME="Mercury Dev" npm run dist  # build a signed macOS .dmg (see below)
 ```
 
-This project uses **pnpm** — `pnpm-lock.yaml` is the lockfile. Don't run `npm` or `yarn` here;
-`npm install` regenerates a `package-lock.json` that conflicts with it (and CI installs with
-`pnpm install --frozen-lockfile`).
+This project uses **classic npm** — `package-lock.json` is the lockfile (CI installs with
+`npm ci`).
 
 ## Building the macOS app
 
 ```bash
-CSC_NAME="Mercury Dev" pnpm run dist
+CSC_NAME="Mercury Dev" npm run dist
 ```
 
 This produces a signed arm64 `.dmg` under `release/` (via `electron-builder`). **Signing with a
 stable identity is required** — here a self-signed "Mercury Dev" certificate in the login
-keychain (no Apple Developer ID needed). A plain `pnpm run dist` falls back to an ad-hoc
+keychain (no Apple Developer ID needed). A plain `npm run dist` falls back to an ad-hoc
 signature, which launches but cannot register for notifications and resets the TCC
 (camera/mic/screen) permission grants on every rebuild — don't use it. See
 [`docs/BUILD-NOTES.md`](docs/BUILD-NOTES.md) for exact `.app`/`.dmg` sizes and the RAM footprint
@@ -67,11 +66,11 @@ signature, which launches but cannot register for notifications and resets the T
 
 ### Faster builds while iterating: skip the .dmg
 
-Most of `pnpm run dist`'s wall time is the single-threaded `.dmg` compression (plus a
+Most of `npm run dist`'s wall time is the single-threaded `.dmg` compression (plus a
 timestamp-server round-trip per signed binary). When you just want the app itself:
 
 ```bash
-pnpm run build && CSC_NAME="Mercury Dev" pnpm exec electron-builder --mac dir
+npm run build && CSC_NAME="Mercury Dev" npx electron-builder --mac dir
 ```
 
 This produces `release/mac-arm64/Messenger.app` directly — signed and launchable — which you can
