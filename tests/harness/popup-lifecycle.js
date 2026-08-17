@@ -15,6 +15,14 @@
 // Verified 2026-08-17 to FAIL on the pre-fix code (scenarios `external` and `silent` both left
 // alive=true visible=true — the blank white window) and pass after.
 //
+// KNOWN-FAILING: the `interstitial` scenario is an OPEN BUG, not a passing test. It reproduces the
+// second blank-window shape Matt still hits on drive.google.com links (popup commits an
+// allowlisted link-shim page, gets revealed, THEN goes external — so reclaimOrphanedPopup's
+// "uncommitted only" guard skips it). It is deliberately NOT in the `test:popups` runner list;
+// add it there once it passes. Run it directly:
+//   npm run build && ./node_modules/electron/dist/Electron.app/Contents/MacOS/Electron \
+//     tests/harness/popup-lifecycle.js interstitial
+//
 // Usage: npm run build && npm run test:popups
 const { app, BrowserWindow, shell, session } = require("electron");
 const http = require("http");
@@ -116,6 +124,14 @@ const server = http.createServer((req, res) => {
     res.end(`<html><body>${body}</body></html>`);
   };
   if (req.url.startsWith("/call")) return page("<h1>call window</h1>");
+  // A link-shim interstitial on an ALLOWLISTED host that immediately bounces to an external URL —
+  // the `l.messenger.com/l.php?u=…` shape. It COMMITS, so the popup is revealed and no longer
+  // looks uncommitted to reclaimOrphanedPopup.
+  if (req.url.startsWith("/interstitial")) {
+    return page(
+      `<script>location.href='https://external.test.invalid/drive';</script>Redirecting\u2026`,
+    );
+  }
   // A deliberately SLOW attachment: headers withheld past the reveal fallback, so the fallback
   // is guaranteed to run while the request is still in flight. This is the one path where the
   // new `destroy` is more aggressive than the old `show` — if the popup were destroyed here,
@@ -137,7 +153,9 @@ const server = http.createServer((req, res) => {
         ? "https://external.test.invalid/thing"
         : SCENARIO === "download"
           ? `http://127.0.0.1:${port}/slow-download`
-          : `http://127.0.0.1:${port}/call`;
+          : SCENARIO === "interstitial"
+            ? `http://127.0.0.1:${port}/interstitial`
+            : `http://127.0.0.1:${port}/call`;
     if (SCENARIO === "silent") {
       // Popup opened and simply abandoned — never assigned a location.
       return page("<script>window.open('about:blank');</script>");
@@ -164,6 +182,10 @@ const EXPECT = {
   // request is still in flight, so `wait` (isLoading) must hold long enough for will-download
   // to take over. The popup must end up gone AND the download must complete.
   download: { alive: false, visible: false, external: 0, downloadState: "completed" },
+  // THE SECOND SHAPE (Matt, 2026-08-17: drive.google.com still leaves a blank window). Popup
+  // commits an allowlisted link-shim page, is revealed, THEN goes external. The link must reach
+  // the browser and the shim window must not be left sitting there.
+  interstitial: { alive: false, visible: false, external: 1 },
 };
 
 app.whenReady().then(() => {

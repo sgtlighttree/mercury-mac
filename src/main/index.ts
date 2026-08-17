@@ -33,11 +33,30 @@ function themeBackgroundColor(): string {
   return nativeTheme.shouldUseDarkColors ? "#1c1c1d" : "#ffffff";
 }
 
+/**
+ * Popup lifecycle tracing. ON by default in dev (`npm start`); in the packaged app set
+ * `MERCURY_TRACE_POPUPS=1` and launch from a terminal to see it:
+ *
+ *   MERCURY_TRACE_POPUPS=1 /Applications/Messenger.app/Contents/MacOS/Messenger
+ *
+ * Kept permanently rather than added and removed per investigation: popup shape is the single
+ * thing this codebase has been surprised by most (about:blank vs real URL for downloads, the
+ * facebook /share/r/ shape, the about:blank-then-assign shape behind the blank-window bug). One
+ * run of this beats another round of inference.
+ */
+const TRACE_POPUPS = !app.isPackaged || process.env.MERCURY_TRACE_POPUPS === "1";
+function trace(event: string, detail: Record<string, unknown>): void {
+  if (!TRACE_POPUPS) return;
+  const parts = Object.entries(detail).map(([k, v]) => `${k}=${String(v)}`);
+  console.log(`[popup-trace] ${event} ${parts.join(" ")}`);
+}
+
 /** Attach the window-open + navigation guards to a webContents, recursively
  *  covering any child windows it opens (e.g. the call popup). */
 function wireNavigationGuards(wc: Electron.WebContents): void {
   wc.setWindowOpenHandler(({ url, frameName }) => {
     const decision = decideWindowOpen(url, frameName);
+    trace("window-open", { url, frameName, decision });
     if (decision === "allow") {
       // EVERY allowed popup is created HIDDEN — download popups (about:blank in
       // 1:1 chats, real fbcdn/fbsbx URLs in group chats) never commit a
@@ -60,6 +79,7 @@ function wireNavigationGuards(wc: Electron.WebContents): void {
     // Observed 2026-07-27: the call popup navigates to
     // `https://www.messenger.com/groupcall/ROOM:<id>/?...&is_e2ee_mandated=true` — a
     // messenger.com host, which is why POPUP_EXTERNAL_HOSTS (facebook.com) cannot touch calls.
+    trace("will-navigate", { url, external: isExternalUrl(url), from: wc.getURL() });
     if (isExternalUrl(url)) {
       event.preventDefault();
       if (isHttpUrl(url)) void shell.openExternal(url);
@@ -67,7 +87,16 @@ function wireNavigationGuards(wc: Electron.WebContents): void {
       reclaimOrphanedPopup(wc);
     }
   });
+  // will-redirect is NOT intercepted (Session 02 follow-up #8) — traced so a server-side 3xx
+  // hop shows up in the log instead of being invisible.
+  wc.on("will-redirect", (_event, url) => {
+    trace("will-redirect", { url, external: isExternalUrl(url), from: wc.getURL() });
+  });
+  wc.on("did-navigate", (_event, url) => {
+    trace("did-navigate", { url });
+  });
   wc.on("did-create-window", (child) => {
+    trace("did-create-window", { url: child.webContents.getURL() });
     wireNavigationGuards(child.webContents);
     attachContextMenu(child.webContents);
     watchPopup(child);
@@ -110,8 +139,18 @@ function attachContextMenu(wc: Electron.WebContents): void {
  */
 function reclaimOrphanedPopup(wc: Electron.WebContents): void {
   const win = BrowserWindow.fromWebContents(wc);
-  if (!win || win === mainWindow || win.isDestroyed()) return;
-  if (!isUncommittedPopup(wc.getURL())) return;
+  if (!win || win === mainWindow || win.isDestroyed()) {
+    trace("reclaim-skipped", { reason: win === mainWindow ? "main-window" : "no-window" });
+    return;
+  }
+  if (!isUncommittedPopup(wc.getURL())) {
+    // KNOWN HOLE (Matt 2026-08-17: drive.google.com still leaves a blank window). A popup that
+    // committed a link-shim page first does not match here, so it survives. See the
+    // `interstitial` scenario in tests/harness/popup-lifecycle.js.
+    trace("reclaim-skipped", { reason: "popup-has-committed-page", url: wc.getURL() });
+    return;
+  }
+  trace("reclaim", { url: wc.getURL() });
   // Deferred: destroying a webContents while it is dispatching its own navigation event.
   setImmediate(() => {
     if (!win.isDestroyed()) win.destroy();
@@ -149,6 +188,7 @@ function watchPopup(child: BrowserWindow): void {
       waitedMs: Date.now() - openedAt,
       maxWaitMs: POPUP_MAX_WAIT_MS,
     });
+    trace("fallback", { decision, url: child.webContents.getURL() });
     if (decision === "reveal") child.show();
     else if (decision === "destroy") child.destroy();
     else fallback = setTimeout(check, POPUP_REVEAL_FALLBACK_MS);
