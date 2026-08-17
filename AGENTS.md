@@ -30,12 +30,16 @@ the calls regression check in `docs/MANUAL-TESTS.md` §9 must be re-run after su
 - `npm run build` — `tsc` (strict typecheck) + esbuild preload bundle into
   `dist/preload/index.js`. **This is the typecheck; there is no separate lint script.** CI runs
   exactly `npm ci && npm run build && npm test`.
-- `CSC_NAME="Mercury Dev" npm run dist` — signed arm64 `.dmg` in `release/`. **`CSC_NAME` is
-  required**: ad-hoc signing can't register notifications and resets TCC (camera/mic/screen)
-  grants every rebuild (see Packaging).
-- Fast packaged build while iterating (skip the slow single-threaded .dmg): `npm run build &&
-  CSC_NAME="Mercury Dev" npx electron-builder --mac dir` →
-  `release/mac-arm64/Messenger.app`.
+- `CSC_NAME="Mercury Dev" npm run pack` — **the default packaged build.** Signed arm64
+  `release/mac-arm64/Messenger.app`, no installer. Owner's rule (2026-08-17): **build the `.app`
+  only unless a `.dmg` is explicitly asked for.** The `.dmg` step is slow and single-threaded and
+  buys nothing for a personal-use app that is installed by dragging it out of `release/`.
+- `CSC_NAME="Mercury Dev" npm run dist` — same app **plus** the arm64 `.dmg`. Only when someone
+  actually needs the installer (sharing a build, testing the Gatekeeper/quarantine path).
+- **`CSC_NAME` is required either way**: ad-hoc signing can't register notifications and resets
+  TCC (camera/mic/screen) grants every rebuild (see Packaging). Both paths run the `afterPack`
+  hook, so fuses and `NSAllowsArbitraryLoads=false` are applied to the `.app` identically —
+  `pack` is not a less-hardened build.
 
 **Notifications are a known, evidence-backed limitation** — messenger.com posts them via Web Push,
 which Electron cannot receive (no push service). Do NOT re-attempt page-Notification interception

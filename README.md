@@ -44,7 +44,7 @@ Requires Node.js and npm.
 npm install                          # install dependencies
 npm start                            # build + launch the app locally
 npm test                             # run the test suite (vitest)
-CSC_NAME="Mercury Dev" npm run dist  # build a signed macOS .dmg (see below)
+CSC_NAME="Mercury Dev" npm run pack  # build the signed macOS .app (see below)
 ```
 
 This project uses **classic npm** — `package-lock.json` is the lockfile (CI installs with
@@ -53,28 +53,28 @@ This project uses **classic npm** — `package-lock.json` is the lockfile (CI in
 ## Building the macOS app
 
 ```bash
-CSC_NAME="Mercury Dev" npm run dist
+CSC_NAME="Mercury Dev" npm run pack
 ```
 
-This produces a signed arm64 `.dmg` under `release/` (via `electron-builder`). **Signing with a
-stable identity is required** — here a self-signed "Mercury Dev" certificate in the login
-keychain (no Apple Developer ID needed). A plain `npm run dist` falls back to an ad-hoc
+This produces a signed arm64 `release/mac-arm64/Messenger.app` (via `electron-builder`), which you
+can copy straight to `/Applications`. **The `.app` is the default build** — most of the alternative
+`npm run dist`'s wall time is single-threaded `.dmg` compression, and this is a personal-use app
+installed by dragging it out of `release/`. **Signing with a stable identity is required** — here a self-signed "Mercury Dev" certificate in the login
+keychain (no Apple Developer ID needed). A plain build without `CSC_NAME` falls back to an ad-hoc
 signature, which launches but cannot register for notifications and resets the TCC
 (camera/mic/screen) permission grants on every rebuild — don't use it. See
 [`docs/BUILD-NOTES.md`](docs/BUILD-NOTES.md) for exact `.app`/`.dmg` sizes and the RAM footprint
 (filled in during a manual pass — not fabricated numbers).
 
-### Faster builds while iterating: skip the .dmg
-
-Most of `npm run dist`'s wall time is the single-threaded `.dmg` compression (plus a
-timestamp-server round-trip per signed binary). When you just want the app itself:
+### When you actually want a .dmg
 
 ```bash
-npm run build && CSC_NAME="Mercury Dev" npx electron-builder --mac dir
+CSC_NAME="Mercury Dev" npm run dist
 ```
 
-This produces `release/mac-arm64/Messenger.app` directly — signed and launchable — which you can
-copy straight to `/Applications`. Build the `.dmg` only when you want a distributable artifact.
+Adds the arm64 `.dmg` under `release/` on top of the same `.app`. Only worth it for a distributable
+artifact — sharing a build, or testing the Gatekeeper/quarantine path. Both scripts run the same
+`afterPack` hardening hook, so `pack` is not a weaker build.
 
 ## Architecture
 

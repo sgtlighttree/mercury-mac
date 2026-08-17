@@ -30,8 +30,14 @@
 Build with the self-signed "Mercury Dev" identity (login keychain, trusted for code signing):
 
 ```bash
-CSC_NAME="Mercury Dev" npm run dist
+CSC_NAME="Mercury Dev" npm run pack   # DEFAULT → release/mac-arm64/Messenger.app
+CSC_NAME="Mercury Dev" npm run dist   # only when a .dmg is actually needed
 ```
+
+**Owner's rule (2026-08-17): `.app` only by default; no `.dmg` unless asked for.** The dmg step is
+slow and single-threaded, and this is a personal-use app installed by dragging the `.app` out of
+`release/`. Both scripts run the same `afterPack` hook, so the hardening below applies to the
+`.app` in either case — `pack` is not a weaker build.
 
 Why signing is mandatory here, learned the hard way:
 - **Ad-hoc builds cannot register with macOS Notification Center** — even main-process
