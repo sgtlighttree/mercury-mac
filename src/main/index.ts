@@ -14,6 +14,7 @@ import {
 import * as path from "path";
 import { TARGET_URL } from "./config";
 import { isExternalUrl, isHttpUrl, decideWindowOpen } from "./links";
+import { isUncommittedPopup, decidePopupFallback } from "./popups";
 import { buildContextMenuTemplate } from "./context-menu";
 import { loadWindowBounds, saveWindowBounds } from "./window-state";
 import { createSplashWindow } from "./splash";
@@ -63,6 +64,7 @@ function wireNavigationGuards(wc: Electron.WebContents): void {
       event.preventDefault();
       if (isHttpUrl(url)) void shell.openExternal(url);
       // non-http(s) schemes are dropped entirely
+      reclaimOrphanedPopup(wc);
     }
   });
   wc.on("did-create-window", (child) => {
@@ -93,11 +95,38 @@ function attachContextMenu(wc: Electron.WebContents): void {
   });
 }
 
-// A hidden popup resolves one of three ways: it commits a real URL (the
-// voice/video call window — reveal it and bring the app forward), its navigation
-// becomes a download (will-download destroys it, unseen), or neither — then the
-// fallback shows it anyway so an unanticipated popup type is never leaked hidden.
+/**
+ * Destroy a popup whose only navigation we just handed to the system browser.
+ *
+ * messenger.com opens external links as `window.open("about:blank")` and assigns
+ * `location` afterwards (verified 2026-08-17 with an Electron harness, see
+ * docs/superpowers/specs/2026-08-17-blank-popup-window-design.md). The window-open handler
+ * therefore sees `about:blank` and allows a hidden popup; `will-navigate` then prevents the
+ * real navigation and opens it in the browser — leaving the popup alive with nothing committed.
+ * watchPopup's fallback used to reveal that as a blank white window.
+ *
+ * Only ever touches a popup with no real page committed, so the main window and a live call
+ * window (which has committed a messenger.com groupcall URL) are never destroyed.
+ */
+function reclaimOrphanedPopup(wc: Electron.WebContents): void {
+  const win = BrowserWindow.fromWebContents(wc);
+  if (!win || win === mainWindow || win.isDestroyed()) return;
+  if (!isUncommittedPopup(wc.getURL())) return;
+  // Deferred: destroying a webContents while it is dispatching its own navigation event.
+  setImmediate(() => {
+    if (!win.isDestroyed()) win.destroy();
+  });
+}
+
+// A hidden popup resolves one of four ways: it commits a real URL (the voice/video call
+// window — reveal it and bring the app forward), its navigation becomes a download
+// (will-download destroys it, unseen), its navigation is handed to the browser
+// (reclaimOrphanedPopup destroys it), or none of those — then the fallback decides between
+// revealing, waiting, and reclaiming it. See decidePopupFallback in popups.ts.
 const POPUP_REVEAL_FALLBACK_MS = 5000;
+// A popup still loading nothing after this long is wedged; reclaim it rather than leak a
+// hidden window forever. Generous, because a slow call popup must never be cut off.
+const POPUP_MAX_WAIT_MS = 30000;
 function watchPopup(child: BrowserWindow): void {
   const onNavigate = (_event: unknown, url: string): void => {
     if (!isHttpUrl(url) || child.isDestroyed()) return;
@@ -109,9 +138,22 @@ function watchPopup(child: BrowserWindow): void {
     child.focus();
   };
   child.webContents.on("did-navigate", onNavigate);
-  const fallback = setTimeout(() => {
-    if (!child.isDestroyed() && !child.isVisible()) child.show();
-  }, POPUP_REVEAL_FALLBACK_MS);
+
+  const openedAt = Date.now();
+  let fallback: NodeJS.Timeout;
+  const check = (): void => {
+    if (child.isDestroyed() || child.isVisible()) return;
+    const decision = decidePopupFallback({
+      currentUrl: child.webContents.getURL(),
+      isLoading: child.webContents.isLoading(),
+      waitedMs: Date.now() - openedAt,
+      maxWaitMs: POPUP_MAX_WAIT_MS,
+    });
+    if (decision === "reveal") child.show();
+    else if (decision === "destroy") child.destroy();
+    else fallback = setTimeout(check, POPUP_REVEAL_FALLBACK_MS);
+  };
+  fallback = setTimeout(check, POPUP_REVEAL_FALLBACK_MS);
   child.on("closed", () => clearTimeout(fallback));
 }
 
