@@ -56,10 +56,16 @@ This project uses **classic npm** — `package-lock.json` is the lockfile (CI in
 CSC_NAME="Mercury Dev" npm run pack
 ```
 
-This produces a signed arm64 `release/mac-arm64/Messenger.app` (via `electron-builder`), which you
-can copy straight to `/Applications`. **The `.app` is the default build** — most of the alternative
-`npm run dist`'s wall time is single-threaded `.dmg` compression, and this is a personal-use app
-installed by dragging it out of `release/`. **Signing with a stable identity is required** — here a self-signed "Mercury Dev" certificate in the login
+This builds a signed arm64 `release/mac-arm64/Messenger.app` (via `electron-builder`) and then
+**installs it into `/Applications`**, quitting any running copy first. No `sudo` needed. Use
+`MERCURY_NO_INSTALL=1 npm run pack` to build without installing.
+
+**The `.app` is the default build** — most of the alternative `npm run dist`'s wall time is
+single-threaded `.dmg` compression, which a personal-use app doesn't need.
+
+The install step verifies the new app's signature *before* replacing the installed one, so a broken
+build can't take out a working install, and keeps the previous copy at
+`~/Quarantine/Messenger.app.previous` for rollback. **Signing with a stable identity is required** — here a self-signed "Mercury Dev" certificate in the login
 keychain (no Apple Developer ID needed). A plain build without `CSC_NAME` falls back to an ad-hoc
 signature, which launches but cannot register for notifications and resets the TCC
 (camera/mic/screen) permission grants on every rebuild — don't use it. See

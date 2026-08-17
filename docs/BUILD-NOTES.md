@@ -30,14 +30,32 @@
 Build with the self-signed "Mercury Dev" identity (login keychain, trusted for code signing):
 
 ```bash
-CSC_NAME="Mercury Dev" npm run pack   # DEFAULT → release/mac-arm64/Messenger.app
+CSC_NAME="Mercury Dev" npm run pack   # DEFAULT → .app, installed into /Applications
 CSC_NAME="Mercury Dev" npm run dist   # only when a .dmg is actually needed
+MERCURY_NO_INSTALL=1 CSC_NAME="Mercury Dev" npm run pack   # pack without installing
 ```
 
+`pack` ends by running `scripts/install-app.cjs`, which quits any running instance and swaps the
+new build into `/Applications`. **No sudo** — `/Applications` is `root:admin drwxrwxr-x` and the
+owner is in `admin` (verified 2026-08-17). Safety properties, all exercised:
+
+- **Signature is verified before `/Applications` is touched**, so a broken build cannot replace a
+  working install. Tested by tampering with `app.asar`: refused, install untouched.
+- **Graceful quit, not SIGKILL** — window geometry is saved in the BrowserWindow `close` handler,
+  so killing hard would lose it. Asks via bundle id, polls 10s, then SIGTERMs the exact PIDs of
+  that bundle. Never a process-name glob. Verified: `window-state.json` survived the swap.
+- **The previous install is rotated to `~/Quarantine/Messenger.app.previous`**, not deleted — one
+  copy, so it doesn't grow without bound. If `ditto` fails, it is restored automatically.
+- **TCC grants are expected to survive** the swap — same bundle id, same `/Applications` path, same
+  "Mercury Dev" signing identity, which is exactly the stable-signature property that made grants
+  survive rebuilds in Session 02. Reasoned, **not separately verified for the install swap**: if
+  macOS re-prompts for mic/camera on first launch after an install, that assumption was wrong and
+  this line should be corrected.
+
 **Owner's rule (2026-08-17): `.app` only by default; no `.dmg` unless asked for.** The dmg step is
-slow and single-threaded, and this is a personal-use app installed by dragging the `.app` out of
-`release/`. Both scripts run the same `afterPack` hook, so the hardening below applies to the
-`.app` in either case — `pack` is not a weaker build.
+slow and single-threaded, and `pack` already puts the app where it needs to be. Both scripts run
+the same `afterPack` hook, so the hardening below applies to the `.app` in either case — `pack` is
+not a weaker build. (`dist` builds the dmg but does **not** run the install step.)
 
 Why signing is mandatory here, learned the hard way:
 - **Ad-hoc builds cannot register with macOS Notification Center** — even main-process

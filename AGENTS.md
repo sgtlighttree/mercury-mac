@@ -31,9 +31,20 @@ the calls regression check in `docs/MANUAL-TESTS.md` §9 must be re-run after su
   `dist/preload/index.js`. **This is the typecheck; there is no separate lint script.** CI runs
   exactly `npm ci && npm run build && npm test`.
 - `CSC_NAME="Mercury Dev" npm run pack` — **the default packaged build.** Signed arm64
-  `release/mac-arm64/Messenger.app`, no installer. Owner's rule (2026-08-17): **build the `.app`
-  only unless a `.dmg` is explicitly asked for.** The `.dmg` step is slow and single-threaded and
-  buys nothing for a personal-use app that is installed by dragging it out of `release/`.
+  `release/mac-arm64/Messenger.app`, **then installed straight into `/Applications`** by
+  `scripts/install-app.cjs`. Owner's rule (2026-08-17): **build the `.app` only unless a `.dmg` is
+  explicitly asked for.** The `.dmg` step is slow and single-threaded and buys nothing for a
+  personal-use app.
+  - No `sudo`: `/Applications` is `root:admin drwxrwxr-x` and the owner is in `admin`. The script
+    refuses with instructions rather than escalating if that ever changes.
+  - A running instance is **quit gracefully** (by bundle id, then SIGTERM to the exact PIDs of
+    that bundle — never a name glob). Graceful matters: window geometry is written in the
+    BrowserWindow `close` handler, so SIGKILL would lose it.
+  - It **verifies the packed app's signature before touching `/Applications`** and refuses on
+    failure, so a broken build can never replace a working install. The previous install is kept
+    at `~/Quarantine/Messenger.app.previous` (one rotating rollback copy).
+  - `MERCURY_NO_INSTALL=1 npm run pack` packs without installing — use it mid-call, or when you
+    only want the artifact.
 - `CSC_NAME="Mercury Dev" npm run dist` — same app **plus** the arm64 `.dmg`. Only when someone
   actually needs the installer (sharing a build, testing the Gatekeeper/quarantine path).
 - **`CSC_NAME` is required either way**: ad-hoc signing can't register notifications and resets
