@@ -16,9 +16,10 @@
 // alive=true visible=true — the blank white window) and pass after.
 //
 // Usage: npm run build && npm run test:popups
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, shell, session } = require("electron");
 const http = require("http");
 const path = require("path");
+const fs = require("fs");
 
 const DIST = path.join(__dirname, "..", "..", "dist", "main");
 const { isUncommittedPopup, decidePopupFallback } = require(path.join(DIST, "popups.js"));
@@ -115,11 +116,28 @@ const server = http.createServer((req, res) => {
     res.end(`<html><body>${body}</body></html>`);
   };
   if (req.url.startsWith("/call")) return page("<h1>call window</h1>");
+  // A deliberately SLOW attachment: headers withheld past the reveal fallback, so the fallback
+  // is guaranteed to run while the request is still in flight. This is the one path where the
+  // new `destroy` is more aggressive than the old `show` — if the popup were destroyed here,
+  // the download would die with it.
+  if (req.url.startsWith("/slow-download")) {
+    return setTimeout(() => {
+      res.writeHead(200, {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": 'attachment; filename="harness-fixture.bin"',
+      });
+      res.write("first-half;");
+      setTimeout(() => res.end("second-half"), 800);
+    }, 1200);
+  }
   if (req.url.startsWith("/opener")) {
+    const port = server.address().port;
     const target =
       SCENARIO === "external"
         ? "https://external.test.invalid/thing"
-        : `http://127.0.0.1:${server.address().port}/call`;
+        : SCENARIO === "download"
+          ? `http://127.0.0.1:${port}/slow-download`
+          : `http://127.0.0.1:${port}/call`;
     if (SCENARIO === "silent") {
       // Popup opened and simply abandoned — never assigned a location.
       return page("<script>window.open('about:blank');</script>");
@@ -142,9 +160,31 @@ const EXPECT = {
   allowed: { alive: true, visible: true, external: 0 },
   // Popup opened and abandoned — must be reclaimed by the fallback, not shown blank.
   silent: { alive: false, visible: false, external: 0 },
+  // DOWNLOADS: popup whose navigation becomes a slow download. The fallback fires while the
+  // request is still in flight, so `wait` (isLoading) must hold long enough for will-download
+  // to take over. The popup must end up gone AND the download must complete.
+  download: { alive: false, visible: false, external: 0, downloadState: "completed" },
 };
 
 app.whenReady().then(() => {
+  // Mirrors index.ts configureSession's will-download handler: park the file and destroy the
+  // popup whose navigation became the download (it was created hidden).
+  let downloadState = "none";
+  session.defaultSession.on("will-download", (_event, item, webContents) => {
+    downloadState = "started";
+    item.setSavePath(path.join(app.getPath("temp"), `harness-${Date.now()}.bin`));
+    item.once("done", (_e, state) => {
+      downloadState = state;
+      try {
+        fs.unlinkSync(item.getSavePath());
+      } catch {
+        /* fixture cleanup is best-effort */
+      }
+    });
+    const win = BrowserWindow.fromWebContents(webContents);
+    if (win && win !== mainWindow && !isHttpUrl(webContents.getURL())) win.destroy();
+  });
+
   server.listen(0, "127.0.0.1", () => {
     const port = server.address().port;
     mainWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
@@ -154,14 +194,14 @@ app.whenReady().then(() => {
     setTimeout(() => {
       const alive = !!popup && !popup.isDestroyed();
       const visible = alive && popup.isVisible();
-      const got = { alive, visible, external: externalCalls.length };
       const want = EXPECT[SCENARIO];
-      const pass =
-        got.alive === want.alive && got.visible === want.visible && got.external === want.external;
+      const got = { alive, visible, external: externalCalls.length };
+      if ("downloadState" in want) got.downloadState = downloadState;
+      const pass = Object.keys(want).every((k) => got[k] === want[k]);
       console.log(`  popupCreated=${!!popup} got=${JSON.stringify(got)}`);
       console.log(`  want=${JSON.stringify(want)}`);
       console.log(`RESULT ${SCENARIO}: ${pass ? "PASS" : "FAIL"}`);
       app.exit(pass ? 0 : 1);
-    }, 4000);
+    }, 5000);
   });
 });
