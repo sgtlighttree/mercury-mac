@@ -39,6 +39,11 @@ const REAL_SHIM =
 const REAL_TARGET = "https://docs.google.com/document/d/1_JXP5KOx/edit?usp=sharing";
 
 const SCENARIO = process.argv[process.argv.length - 1];
+
+// Park every harness window far offscreen. These are REAL BrowserWindows — that is the point of
+// this harness — but they must never paint on the developer's display. `isVisible()` still reports
+// true for an offscreen window, so every assertion below is unaffected.
+const OFFSCREEN = { x: -20000, y: -20000, width: 400, height: 300, skipTaskbar: true };
 const FALLBACK_MS = 400;
 const MAX_WAIT_MS = 2000;
 
@@ -125,7 +130,7 @@ function watchPopup(child) {
 function wire(wc) {
   wc.setWindowOpenHandler(({ url, frameName }) => {
     if ((url === "about:blank" || url === "about:blank#blocked") && frameName !== "about:blank") {
-      return { action: "allow", overrideBrowserWindowOptions: { show: false } };
+      return { action: "allow", overrideBrowserWindowOptions: { show: false, ...OFFSCREEN } };
     }
     // Mirrors index.ts: a tracking link shim never becomes a popup, and the browser is handed the
     // unwrapped destination rather than the tracking URL.
@@ -136,7 +141,7 @@ function wire(wc) {
     // Mirrors decideWindowOpen's final branches: an allowlisted host is ALLOWED as a popup
     // (this is how l.messenger.com became a window), everything else goes to the browser.
     if (!isExternalUrl(url)) {
-      return { action: "allow", overrideBrowserWindowOptions: { show: false } };
+      return { action: "allow", overrideBrowserWindowOptions: { show: false, ...OFFSCREEN } };
     }
     if (isHttpUrl(url)) void shell.openExternal(url);
     return { action: "deny" };
@@ -270,7 +275,11 @@ app.whenReady().then(() => {
 
   server.listen(0, "127.0.0.1", () => {
     const port = server.address().port;
-    mainWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
+    mainWindow = new BrowserWindow({
+      show: false,
+      ...OFFSCREEN,
+      webPreferences: { sandbox: true },
+    });
     wire(mainWindow.webContents);
     mainWindow.loadURL(`http://127.0.0.1:${port}/opener`);
 
