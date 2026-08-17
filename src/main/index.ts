@@ -140,7 +140,10 @@ function attachContextMenu(wc: Electron.WebContents): void {
 function reclaimOrphanedPopup(wc: Electron.WebContents): void {
   const win = BrowserWindow.fromWebContents(wc);
   if (!win || win === mainWindow || win.isDestroyed()) {
-    trace("reclaim-skipped", { reason: win === mainWindow ? "main-window" : "no-window" });
+    // Three-way, not a ternary: a destroyed window logged as "no-window" would misread the trace
+    // at exactly the moment the trace matters.
+    const reason = !win ? "no-window" : win === mainWindow ? "main-window" : "already-destroyed";
+    trace("reclaim-skipped", { reason });
     return;
   }
   if (!isUncommittedPopup(wc.getURL())) {

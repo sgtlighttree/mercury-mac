@@ -10,7 +10,7 @@
     "build": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\" && tsc --noEmit && tsc -p tsconfig.build.json && esbuild src/preload/index.ts --bundle --outfile=dist/preload/index.js --external:electron --format=cjs --platform=browser",
     "start": "npm run build && electron .",
     "test": "vitest run",
-    "test:popups": "npm run build && node -e \"['external','allowed','silent','download'].forEach(s=>{const r=require('child_process').spawnSync(require('electron'),['tests/harness/popup-lifecycle.js',s],{stdio:'inherit'});if(r.status!==0)process.exit(1)})\"",
+    "test:popups": "npm run build && node -e \"['external','allowed','silent','download','call-external'].forEach(s=>{const r=require('child_process').spawnSync(require('electron'),['tests/harness/popup-lifecycle.js',s],{stdio:'inherit'});if(r.status!==0)process.exit(1)})\"",
     "pack": "npm run build && electron-builder --mac dir --arm64 && node scripts/install-app.cjs",
     "dist": "npm run build && electron-builder --mac"
   },

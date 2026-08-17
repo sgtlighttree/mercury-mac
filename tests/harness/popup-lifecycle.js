@@ -123,6 +123,15 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "text/html" });
     res.end(`<html><body>${body}</body></html>`);
   };
+  // A settled call window that LATER navigates somewhere external — someone clicked a link inside
+  // the call UI. It must SURVIVE. This is the guard rail for any future fix to `interstitial`:
+  // whatever rule reclaims the shim popup must not also reclaim this one.
+  if (req.url.startsWith("/call-then-external")) {
+    return page(
+      "<h1>call window</h1><script>setTimeout(()=>{location.href=" +
+        "'https://external.test.invalid/clicked-in-call';},1500);</script>",
+    );
+  }
   if (req.url.startsWith("/call")) return page("<h1>call window</h1>");
   // A link-shim interstitial on an ALLOWLISTED host that immediately bounces to an external URL —
   // the `l.messenger.com/l.php?u=…` shape. It COMMITS, so the popup is revealed and no longer
@@ -155,7 +164,9 @@ const server = http.createServer((req, res) => {
           ? `http://127.0.0.1:${port}/slow-download`
           : SCENARIO === "interstitial"
             ? `http://127.0.0.1:${port}/interstitial`
-            : `http://127.0.0.1:${port}/call`;
+            : SCENARIO === "call-external"
+              ? `http://127.0.0.1:${port}/call-then-external`
+              : `http://127.0.0.1:${port}/call`;
     if (SCENARIO === "silent") {
       // Popup opened and simply abandoned — never assigned a location.
       return page("<script>window.open('about:blank');</script>");
@@ -186,6 +197,10 @@ const EXPECT = {
   // commits an allowlisted link-shim page, is revealed, THEN goes external. The link must reach
   // the browser and the shim window must not be left sitting there.
   interstitial: { alive: false, visible: false, external: 1 },
+  // THE GUARD RAIL: a settled call window whose user clicked an external link. The link goes to
+  // the browser and the call window MUST survive. Any fix for `interstitial` that breaks this has
+  // traded a cosmetic bug for a dropped call.
+  "call-external": { alive: true, visible: true, external: 1 },
 };
 
 app.whenReady().then(() => {
