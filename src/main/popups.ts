@@ -47,3 +47,34 @@ export function decidePopupFallback(state: PopupFallbackState): PopupFallback {
   if (state.isLoading && state.waitedMs < state.maxWaitMs) return "wait";
   return "destroy";
 }
+
+export interface ExternalNavigationState {
+  /** The window owning the navigating webContents is the app's main window. */
+  isMainWindow: boolean;
+  /** This popup has been SHOWN to the user (see the settle delay in index.ts watchPopup). */
+  hasBeenRevealed: boolean;
+}
+
+/**
+ * Should a popup be destroyed when a navigation it initiated is handed to the system browser?
+ *
+ * THE INVARIANT: **never destroy a window the user has actually seen.** Everything else follows.
+ *
+ * A link-shim popup ("leaving Messenger" redirectors, `…/l.php?u=<target>` and friends) commits a
+ * page whose only job is to bounce elsewhere. Because index.ts waits a settle delay before
+ * revealing a freshly committed popup, a redirector externalizes while still UNREVEALED — so it is
+ * destroyed without ever having been shown, and no blank window appears at any point.
+ *
+ * A real window — the voice/video call popup above all — survives the settle delay, gets revealed,
+ * and from then on is permanently exempt. If its user later clicks an external link, the link goes
+ * to the browser and the window stays. That is what `call-external` in
+ * tests/harness/popup-lifecycle.js pins, and it is why this is a reveal-state rule rather than a
+ * "did it navigate quickly" timing heuristic: timing would have to guess how fast a human clicks.
+ *
+ * Note this SUBSUMES the earlier "uncommitted popups only" rule — a popup with nothing committed
+ * has by definition never been revealed.
+ */
+export function shouldReclaimOnExternalNavigation(state: ExternalNavigationState): boolean {
+  if (state.isMainWindow) return false;
+  return !state.hasBeenRevealed;
+}

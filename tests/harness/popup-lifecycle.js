@@ -15,13 +15,10 @@
 // Verified 2026-08-17 to FAIL on the pre-fix code (scenarios `external` and `silent` both left
 // alive=true visible=true — the blank white window) and pass after.
 //
-// KNOWN-FAILING: the `interstitial` scenario is an OPEN BUG, not a passing test. It reproduces the
-// second blank-window shape Matt still hits on drive.google.com links (popup commits an
-// allowlisted link-shim page, gets revealed, THEN goes external — so reclaimOrphanedPopup's
-// "uncommitted only" guard skips it). It is deliberately NOT in the `test:popups` runner list;
-// add it there once it passes. Run it directly:
-//   npm run build && ./node_modules/electron/dist/Electron.app/Contents/MacOS/Electron \
-//     tests/harness/popup-lifecycle.js interstitial
+// All seven scenarios pass and all are in the `test:popups` runner. Each was verified to FAIL on
+// the code before its corresponding fix — a scenario that passes both before and after pins
+// nothing. `shim-direct` is the real traced bug; `call-external` is the guard rail that fails if a
+// fix is too aggressive and would kill a call window.
 //
 // Usage: npm run build && npm run test:popups
 const { app, BrowserWindow, shell, session } = require("electron");
@@ -30,8 +27,16 @@ const path = require("path");
 const fs = require("fs");
 
 const DIST = path.join(__dirname, "..", "..", "dist", "main");
-const { isUncommittedPopup, decidePopupFallback } = require(path.join(DIST, "popups.js"));
-const { isHttpUrl } = require(path.join(DIST, "links.js"));
+const { decidePopupFallback, shouldReclaimOnExternalNavigation } = require(
+  path.join(DIST, "popups.js"),
+);
+const { isHttpUrl, isLinkShim, externalTarget } = require(path.join(DIST, "links.js"));
+
+// The REAL shim URL captured from Matt's session 2026-08-17 (truncated hash), and its target.
+const REAL_SHIM =
+  "https://l.messenger.com/l.php?u=https%3A%2F%2Fdocs.google.com%2Fdocument%2Fd%2F1_JXP5KOx" +
+  "%2Fedit%3Fusp%3Dsharing&h=AUDjfjLEcqof3ACYMiWSkJgiA26k";
+const REAL_TARGET = "https://docs.google.com/document/d/1_JXP5KOx/edit?usp=sharing";
 
 const SCENARIO = process.argv[process.argv.length - 1];
 const FALLBACK_MS = 400;
@@ -46,22 +51,40 @@ shell.openExternal = (url) => {
 let mainWindow = null;
 let popup = null;
 
-// --- allowlist: 127.0.0.1 stands in for messenger.com -----------------------
+// --- allowlist: 127.0.0.1 stands in for messenger.com ------------------------
+// messenger.com itself is ALSO allowlisted here, exactly as in config.ts — that is what makes
+// `l.messenger.com` (a subdomain) an allowed popup, which is the whole mechanism of the bug.
+// Without it the shim scenario would pass trivially by being treated as an external host.
 const isExternalUrl = (raw) => {
   try {
     const u = new URL(raw);
     if (u.protocol !== "https:" && u.protocol !== "http:") return true;
-    return u.hostname.toLowerCase() !== "127.0.0.1";
+    const h = u.hostname.toLowerCase();
+    return h !== "127.0.0.1" && h !== "messenger.com" && !h.endsWith(".messenger.com");
   } catch {
     return true;
   }
 };
 
-// --- mirrors index.ts reclaimOrphanedPopup ---------------------------------
+const SETTLE_MS = 250; // index.ts uses 800; shortened here like the other harness timings
+
+// --- mirrors index.ts revealedPopups + reclaimOrphanedPopup ------------------
+const revealedPopups = new WeakSet();
+function revealPopup(child, why) {
+  if (child.isDestroyed() || revealedPopups.has(child)) return;
+  revealedPopups.add(child);
+  console.log(`  [reveal] why=${why}`);
+  if (!child.isVisible()) child.show();
+}
 function reclaimOrphanedPopup(wc) {
   const win = BrowserWindow.fromWebContents(wc);
-  if (!win || win === mainWindow || win.isDestroyed()) return;
-  if (!isUncommittedPopup(wc.getURL())) return;
+  if (!win || win.isDestroyed()) return;
+  const reclaim = shouldReclaimOnExternalNavigation({
+    isMainWindow: win === mainWindow,
+    hasBeenRevealed: revealedPopups.has(win),
+  });
+  console.log(`  [reclaim] decision=${reclaim ? "destroy" : "keep"}`);
+  if (!reclaim) return;
   setImmediate(() => {
     if (!win.isDestroyed()) win.destroy();
   });
@@ -69,10 +92,11 @@ function reclaimOrphanedPopup(wc) {
 
 // --- mirrors index.ts watchPopup -------------------------------------------
 function watchPopup(child) {
+  let settleTimer = null;
   const onNavigate = (_e, url) => {
     if (!isHttpUrl(url) || child.isDestroyed()) return;
     child.webContents.off("did-navigate", onNavigate);
-    if (!child.isVisible()) child.show();
+    settleTimer = setTimeout(() => revealPopup(child, "settled"), SETTLE_MS);
   };
   child.webContents.on("did-navigate", onNavigate);
   const openedAt = Date.now();
@@ -86,12 +110,15 @@ function watchPopup(child) {
       maxWaitMs: MAX_WAIT_MS,
     });
     console.log(`  [watchPopup] decision=${decision}`);
-    if (decision === "reveal") child.show();
+    if (decision === "reveal") revealPopup(child, "fallback");
     else if (decision === "destroy") child.destroy();
     else fallback = setTimeout(check, FALLBACK_MS);
   };
   fallback = setTimeout(check, FALLBACK_MS);
-  child.on("closed", () => clearTimeout(fallback));
+  child.on("closed", () => {
+    clearTimeout(fallback);
+    if (settleTimer) clearTimeout(settleTimer);
+  });
 }
 
 // --- mirrors index.ts wireNavigationGuards ---------------------------------
@@ -100,7 +127,18 @@ function wire(wc) {
     if ((url === "about:blank" || url === "about:blank#blocked") && frameName !== "about:blank") {
       return { action: "allow", overrideBrowserWindowOptions: { show: false } };
     }
-    if (isExternalUrl(url) && isHttpUrl(url)) void shell.openExternal(url);
+    // Mirrors index.ts: a tracking link shim never becomes a popup, and the browser is handed the
+    // unwrapped destination rather than the tracking URL.
+    if (isLinkShim(url)) {
+      void shell.openExternal(externalTarget(url));
+      return { action: "deny" };
+    }
+    // Mirrors decideWindowOpen's final branches: an allowlisted host is ALLOWED as a popup
+    // (this is how l.messenger.com became a window), everything else goes to the browser.
+    if (!isExternalUrl(url)) {
+      return { action: "allow", overrideBrowserWindowOptions: { show: false } };
+    }
+    if (isHttpUrl(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
   wc.on("will-navigate", (event, url) => {
@@ -167,6 +205,10 @@ const server = http.createServer((req, res) => {
             : SCENARIO === "call-external"
               ? `http://127.0.0.1:${port}/call-then-external`
               : `http://127.0.0.1:${port}/call`;
+    if (SCENARIO === "shim-direct") {
+      // THE REAL SHAPE from the trace: window.open() straight to the l.messenger.com shim.
+      return page(`<script>window.open(${JSON.stringify(REAL_SHIM)});</script>`);
+    }
     if (SCENARIO === "silent") {
       // Popup opened and simply abandoned — never assigned a location.
       return page("<script>window.open('about:blank');</script>");
@@ -201,6 +243,10 @@ const EXPECT = {
   // the browser and the call window MUST survive. Any fix for `interstitial` that breaks this has
   // traded a cosmetic bug for a dropped call.
   "call-external": { alive: true, visible: true, external: 1 },
+  // THE ACTUAL BUG, in its real traced shape: window.open() directly to the l.messenger.com
+  // tracking shim. No window may be created at all, and the browser must receive the UNWRAPPED
+  // destination (docs.google.com), not the tracking URL.
+  "shim-direct": { popupCreated: false, external: 1, externalUrl: REAL_TARGET },
 };
 
 app.whenReady().then(() => {
@@ -234,6 +280,9 @@ app.whenReady().then(() => {
       const want = EXPECT[SCENARIO];
       const got = { alive, visible, external: externalCalls.length };
       if ("downloadState" in want) got.downloadState = downloadState;
+      if ("popupCreated" in want) got.popupCreated = !!popup;
+      if ("externalUrl" in want) got.externalUrl = externalCalls[0];
+      for (const k of Object.keys(got)) if (!(k in want)) delete got[k];
       const pass = Object.keys(want).every((k) => got[k] === want[k]);
       console.log(`  popupCreated=${!!popup} got=${JSON.stringify(got)}`);
       console.log(`  want=${JSON.stringify(want)}`);

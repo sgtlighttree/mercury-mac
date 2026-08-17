@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isExternalUrl, isHttpUrl, decideWindowOpen, isPopupExternalHost } from "../src/main/links";
+import { isExternalUrl, isHttpUrl, decideWindowOpen, isPopupExternalHost, unwrapLinkShim, isLinkShim, externalTarget } from "../src/main/links";
 
 describe("isExternalUrl", () => {
   it("keeps messenger.com internal", () => {
@@ -95,5 +95,58 @@ describe("isPopupExternalHost", () => {
   it("returns false for about:blank and non-http schemes so they fall through", () => {
     expect(isPopupExternalHost("about:blank")).toBe(false);
     expect(isPopupExternalHost("javascript:void(0)")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Link shim (the blank-window bug). URLs below are the REAL shape captured from
+// Matt's session on 2026-08-17, not invented fixtures.
+// ---------------------------------------------------------------------------
+describe("link shim unwrapping", () => {
+  const REAL_SHIM =
+    "https://l.messenger.com/l.php?u=https%3A%2F%2Fdocs.google.com%2Fdocument%2Fd%2F1_JXP5KOxvJ_d2Zp5z3eEZpjdZLksJld_K6MavXWGJyE%2Fedit%3Fusp%3Dsharing&h=AUDjfjLEcqof3ACYMiWSkJgiA26k";
+  const REAL_TARGET =
+    "https://docs.google.com/document/d/1_JXP5KOxvJ_d2Zp5z3eEZpjdZLksJld_K6MavXWGJyE/edit?usp=sharing";
+
+  it("unwraps the real l.messenger.com shim from the 2026-08-17 trace", () => {
+    expect(unwrapLinkShim(REAL_SHIM)).toBe(REAL_TARGET);
+  });
+
+  it("sends that shim to the browser instead of opening a popup (THE BUG)", () => {
+    expect(decideWindowOpen(REAL_SHIM, "")).toBe("open-external");
+  });
+
+  it("hands the browser the real destination, not the tracking URL", () => {
+    expect(externalTarget(REAL_SHIM)).toBe(REAL_TARGET);
+  });
+
+  it("handles l.facebook.com and the /flx/warn interstitial too", () => {
+    expect(unwrapLinkShim("https://l.facebook.com/l.php?u=https%3A%2F%2Fexample.com%2Fa&h=AT")).toBe(
+      "https://example.com/a",
+    );
+    expect(
+      unwrapLinkShim("https://www.facebook.com/flx/warn/?u=https%3A%2F%2Fexample.com%2Fb&h=AT"),
+    ).toBe("https://example.com/b");
+  });
+
+  it("never unwraps a non-http(s) payload into shell.openExternal", () => {
+    // `u` is attacker-influenced and destined for the shell — this is the security boundary.
+    expect(unwrapLinkShim("https://l.messenger.com/l.php?u=javascript%3Aalert(1)")).toBeNull();
+    expect(unwrapLinkShim("https://l.messenger.com/l.php?u=file%3A%2F%2F%2Fetc%2Fpasswd")).toBeNull();
+    expect(externalTarget("https://l.messenger.com/l.php?u=javascript%3Aalert(1)")).toBe(
+      "https://l.messenger.com/l.php?u=javascript%3Aalert(1)",
+    );
+  });
+
+  it("leaves ordinary URLs and non-shims alone", () => {
+    expect(unwrapLinkShim("https://www.messenger.com/t/123/")).toBeNull();
+    expect(unwrapLinkShim("https://l.messenger.com/other")).toBeNull();
+    expect(unwrapLinkShim("https://l.messenger.com/l.php")).toBeNull();
+    expect(externalTarget("https://drive.google.com/x")).toBe("https://drive.google.com/x");
+  });
+
+  it("does not disturb the calls path: about:blank still wins", () => {
+    expect(decideWindowOpen("about:blank", "")).toBe("allow");
+    expect(isLinkShim("about:blank")).toBe(false);
   });
 });

@@ -13,8 +13,8 @@ import {
 } from "electron";
 import * as path from "path";
 import { TARGET_URL } from "./config";
-import { isExternalUrl, isHttpUrl, decideWindowOpen } from "./links";
-import { isUncommittedPopup, decidePopupFallback } from "./popups";
+import { isExternalUrl, isHttpUrl, decideWindowOpen, externalTarget } from "./links";
+import { decidePopupFallback, shouldReclaimOnExternalNavigation } from "./popups";
 import { buildContextMenuTemplate } from "./context-menu";
 import { loadWindowBounds, saveWindowBounds } from "./window-state";
 import { createSplashWindow } from "./splash";
@@ -68,7 +68,7 @@ function wireNavigationGuards(wc: Electron.WebContents): void {
         overrideBrowserWindowOptions: { show: false, backgroundColor: themeBackgroundColor() },
       };
     }
-    if (decision === "open-external") void shell.openExternal(url);
+    if (decision === "open-external") void shell.openExternal(externalTarget(url));
     else if (!app.isPackaged) {
       console.log("[window-open] dropped:", url);
     }
@@ -82,7 +82,7 @@ function wireNavigationGuards(wc: Electron.WebContents): void {
     trace("will-navigate", { url, external: isExternalUrl(url), from: wc.getURL() });
     if (isExternalUrl(url)) {
       event.preventDefault();
-      if (isHttpUrl(url)) void shell.openExternal(url);
+      if (isHttpUrl(url)) void shell.openExternal(externalTarget(url));
       // non-http(s) schemes are dropped entirely
       reclaimOrphanedPopup(wc);
     }
@@ -125,32 +125,33 @@ function attachContextMenu(wc: Electron.WebContents): void {
 }
 
 /**
- * Destroy a popup whose only navigation we just handed to the system browser.
+ * Destroy a popup whose navigation we just handed to the system browser, when that popup has
+ * nothing left to show. Policy lives in shouldReclaimOnExternalNavigation (popups.ts).
  *
- * messenger.com opens external links as `window.open("about:blank")` and assigns
- * `location` afterwards (verified 2026-08-17 with an Electron harness, see
- * docs/superpowers/specs/2026-08-17-blank-popup-window-design.md). The window-open handler
- * therefore sees `about:blank` and allows a hidden popup; `will-navigate` then prevents the
- * real navigation and opens it in the browser — leaving the popup alive with nothing committed.
- * watchPopup's fallback used to reveal that as a blank white window.
+ * Two shapes of blank window both land here, and BOTH are covered by the one reveal-state rule:
+ *  1. `window.open("about:blank")` then `location = <external>` — never commits anything.
+ *  2. `window.open(<shim>)` (or about:blank then a shim on an allowlisted host) — commits a
+ *     "leaving Messenger" redirector, which bounces onward before the reveal settle delay
+ *     elapses. Shape 2 is what survived the first fix: it HAD committed a page, so the old
+ *     "uncommitted only" guard skipped it.
  *
- * Only ever touches a popup with no real page committed, so the main window and a live call
- * window (which has committed a messenger.com groupcall URL) are never destroyed.
+ * The main window and any popup the user has actually seen are never destroyed.
  */
 function reclaimOrphanedPopup(wc: Electron.WebContents): void {
   const win = BrowserWindow.fromWebContents(wc);
-  if (!win || win === mainWindow || win.isDestroyed()) {
-    // Three-way, not a ternary: a destroyed window logged as "no-window" would misread the trace
-    // at exactly the moment the trace matters.
-    const reason = !win ? "no-window" : win === mainWindow ? "main-window" : "already-destroyed";
-    trace("reclaim-skipped", { reason });
+  if (!win || win.isDestroyed()) {
+    trace("reclaim-skipped", { reason: !win ? "no-window" : "already-destroyed" });
     return;
   }
-  if (!isUncommittedPopup(wc.getURL())) {
-    // KNOWN HOLE (Matt 2026-08-17: drive.google.com still leaves a blank window). A popup that
-    // committed a link-shim page first does not match here, so it survives. See the
-    // `interstitial` scenario in tests/harness/popup-lifecycle.js.
-    trace("reclaim-skipped", { reason: "popup-has-committed-page", url: wc.getURL() });
+  const reclaim = shouldReclaimOnExternalNavigation({
+    isMainWindow: win === mainWindow,
+    hasBeenRevealed: revealedPopups.has(win),
+  });
+  if (!reclaim) {
+    trace("reclaim-skipped", {
+      reason: win === mainWindow ? "main-window" : "popup-already-revealed",
+      url: wc.getURL(),
+    });
     return;
   }
   trace("reclaim", { url: wc.getURL() });
@@ -169,15 +170,41 @@ const POPUP_REVEAL_FALLBACK_MS = 5000;
 // A popup still loading nothing after this long is wedged; reclaim it rather than leak a
 // hidden window forever. Generous, because a slow call popup must never be cut off.
 const POPUP_MAX_WAIT_MS = 30000;
+/**
+ * Grace period between a popup committing a page and actually showing it.
+ *
+ * A link-shim / "leaving Messenger" redirector commits a page and bounces onward within a few
+ * milliseconds — on parse. Waiting a beat before revealing means the redirector externalizes while
+ * still unrevealed, so reclaimOrphanedPopup destroys it and the user never sees a blank window at
+ * all. A real popup (the call window) simply appears this much later, which is imperceptible next
+ * to the network round-trip that preceded it.
+ */
+const POPUP_REVEAL_SETTLE_MS = 800;
+
+/** Popups the user has actually SEEN. These are never auto-destroyed again — see
+ *  shouldReclaimOnExternalNavigation. WeakSet so closed windows drop out on their own. */
+const revealedPopups = new WeakSet<BrowserWindow>();
+
+function revealPopup(child: BrowserWindow, why: string): void {
+  if (child.isDestroyed() || revealedPopups.has(child)) return;
+  revealedPopups.add(child);
+  trace("reveal", { why, url: child.webContents.getURL() });
+  if (!child.isVisible()) child.show();
+  // An incoming ring must grab attention (Matt's note: calls should steal
+  // focus) — bring the app forward even if another app is frontmost.
+  app.focus({ steal: true });
+  child.focus();
+}
+
 function watchPopup(child: BrowserWindow): void {
+  let settleTimer: NodeJS.Timeout | null = null;
   const onNavigate = (_event: unknown, url: string): void => {
     if (!isHttpUrl(url) || child.isDestroyed()) return;
     child.webContents.off("did-navigate", onNavigate);
-    if (!child.isVisible()) child.show();
-    // An incoming ring must grab attention (Matt's note: calls should steal
-    // focus) — bring the app forward even if another app is frontmost.
-    app.focus({ steal: true });
-    child.focus();
+    // Do NOT show yet: a redirector would be revealed here and then be permanently exempt from
+    // reclaiming, which is exactly the bug (a revealed window is never re-examined).
+    trace("committed", { url, settleMs: POPUP_REVEAL_SETTLE_MS });
+    settleTimer = setTimeout(() => revealPopup(child, "settled"), POPUP_REVEAL_SETTLE_MS);
   };
   child.webContents.on("did-navigate", onNavigate);
 
@@ -192,12 +219,15 @@ function watchPopup(child: BrowserWindow): void {
       maxWaitMs: POPUP_MAX_WAIT_MS,
     });
     trace("fallback", { decision, url: child.webContents.getURL() });
-    if (decision === "reveal") child.show();
+    if (decision === "reveal") revealPopup(child, "fallback");
     else if (decision === "destroy") child.destroy();
     else fallback = setTimeout(check, POPUP_REVEAL_FALLBACK_MS);
   };
   fallback = setTimeout(check, POPUP_REVEAL_FALLBACK_MS);
-  child.on("closed", () => clearTimeout(fallback));
+  child.on("closed", () => {
+    clearTimeout(fallback);
+    if (settleTimer) clearTimeout(settleTimer);
+  });
 }
 
 // Cap on how long the splash may cover a hidden main window if neither
