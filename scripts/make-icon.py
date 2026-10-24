@@ -13,7 +13,7 @@ import json, math, os, shutil, subprocess, sys, tempfile
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else "build"
 TOP, BOTTOM = "#5B6CF0", "#1E1B4B"  # background gradient: indigo to ink
-WING, BUBBLE = "#FFC94A", "#FFFFFF"
+WING = "#FFC94A"
 
 
 def svg(body, defs=""):
@@ -21,15 +21,30 @@ def svg(body, defs=""):
             f'width="1024" height="1024">{defs}{body}</svg>\n')
 
 
-# Bubble: ellipse plus a tail at the lower left, as one closed path.
-cx, cy, rx, ry = 636, 548, 236, 204
-def on_ellipse(deg):
-    r = math.radians(deg)
-    return cx + rx * math.cos(r), cy + ry * math.sin(r)
-a1, a2 = on_ellipse(138), on_ellipse(104)
-bubble_d = (f"M{a1[0]:.1f},{a1[1]:.1f} A{rx},{ry} 0 1 1 {a2[0]:.1f},{a2[1]:.1f} "
-            f"C540,794 494,830 430,842 C464,800 462,748 {a1[0]:.1f},{a1[1]:.1f} Z")
-bubble_el = f'<path d="{bubble_d}" fill="{BUBBLE}"/>'
+# Bubble: a quicksilver blob. A closed Catmull-Rom spline through hand-placed points gives a
+# soft, slightly lopsided body that sags into a rounded tail at the lower left: one shape.
+blob_pts = [(640, 318), (790, 336), (884, 428), (904, 548), (856, 664), (744, 742), (618, 764),
+            (530, 806), (456, 846), (432, 812), (436, 748), (398, 660), (380, 548), (418, 428), (516, 346)]
+def closed_spline(p):
+    n = len(p)
+    d = f"M{p[0][0]},{p[0][1]} "
+    for i in range(n):
+        p0, p1, p2, p3 = p[i - 1], p[i], p[(i + 1) % n], p[(i + 2) % n]
+        c1 = (p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6)
+        c2 = (p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6)
+        d += f"C{c1[0]:.1f},{c1[1]:.1f} {c2[0]:.1f},{c2[1]:.1f} {p2[0]},{p2[1]} "
+    return d + "Z"
+bubble_d = closed_spline(blob_pts)
+# Chrome: bright sky on top, a dark horizon band tinted by the indigo background, bright floor.
+chrome = ('<linearGradient id="chrome" x1="0" y1="0" x2="0.15" y2="1">'
+          '<stop offset="0" stop-color="#FFFFFF"/><stop offset="0.3" stop-color="#DDE1EC"/>'
+          '<stop offset="0.58" stop-color="#8A90B6"/><stop offset="0.8" stop-color="#BCC2D8"/>'
+          '<stop offset="1" stop-color="#F3F5FA"/></linearGradient>')
+bubble_el = (f'<path d="{bubble_d}" fill="url(#chrome)"/>'
+)
+# Specular glints, composite only (Icon Composer adds its own specular to the glass layers).
+glints = ('<ellipse cx="560" cy="410" rx="92" ry="34" transform="rotate(-24 560 410)" fill="#FFFFFF" opacity="0.9" filter="url(#soft)"/>'
+          '<circle cx="680" cy="372" r="14" fill="#FFFFFF" opacity="0.85" filter="url(#soft)"/>')
 
 # Wing: tapered feathers fanned from one root behind the bubble. Lengths grow toward the
 # top so the leading edge is one smooth curve and only the trailing tips stagger.
@@ -54,17 +69,18 @@ for i in range(360):
     pts.append((c + half * math.copysign(abs(co) ** (2 / n), co), c + half * math.copysign(abs(si) ** (2 / n), si)))
 body = "M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in pts) + " Z"
 composite_defs = (
-    f"<defs>{gradient}<clipPath id=\"body\"><path d=\"{body}\"/></clipPath>"
+    f"<defs>{gradient}{chrome}<clipPath id=\"body\"><path d=\"{body}\"/></clipPath>"
     '<filter id="drop" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity="0.30"/></filter>'
+    '<filter id="soft"><feGaussianBlur stdDeviation="7"/></filter>'
     '<filter id="lift" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.22"/></filter></defs>')
 art = (f'<g transform="translate(100,100) scale({824/1024})">'
-       f'<g filter="url(#lift)">{wing_el}</g><g filter="url(#lift)">{bubble_el}</g></g>')
+       f'<g filter="url(#lift)">{wing_el}</g><g filter="url(#lift)">{bubble_el}</g>{glints}</g>')
 composite = f'<path d="{body}" fill="url(#bg)" filter="url(#drop)"/><g clip-path="url(#body)">{art}</g>'
 
 layers = {
     "background.svg": svg('<rect width="1024" height="1024" fill="url(#bg)"/>', f"<defs>{gradient}</defs>"),
     "wing.svg": svg(wing_el),
-    "bubble.svg": svg(bubble_el),
+    "bubble.svg": svg(bubble_el, f"<defs>{chrome}</defs>"),
     "composite.svg": svg(composite, composite_defs),
 }
 svg_dir = os.path.join(OUT, "icon-svg")
