@@ -7,7 +7,7 @@ Needs `resvg` (brew install resvg) and macOS `iconutil`. No Python packages.
 Outputs:
   build/icon-svg/      background, wing, bubble (flat layers) + composite.svg (flattened .icns art)
   build/icon.icon/     Icon Composer bundle (Liquid Glass source; compiling it needs Xcode 26's actool)
-  build/icon.icns      legacy icon on the Big Sur grid (824 superellipse on a 1024 canvas)
+  build/icon.icns      legacy icon: full-bleed opaque square; macOS applies its own mask
 """
 import json, math, os, shutil, subprocess, sys, tempfile
 
@@ -49,22 +49,14 @@ glints = (f'<path d="M{g1[0]:.1f},{g1[1]:.1f} A{r},{r} 0 0 1 {g2[0]:.1f},{g2[1]:
 gradient = (f'<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{TOP}"/>'
             f'<stop offset="1" stop-color="{BOTTOM}"/></linearGradient>')
 
-# Big Sur grid: continuous-corner body approximated by a superellipse (n=5).
-n, half, c = 5, 412, 512
-pts = []
-for i in range(360):
-    t = 2 * math.pi * i / 360
-    co, si = math.cos(t), math.sin(t)
-    pts.append((c + half * math.copysign(abs(co) ** (2 / n), co), c + half * math.copysign(abs(si) ** (2 / n), si)))
-body = "M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in pts) + " Z"
+# .icns art is a full-bleed opaque square: macOS 26 masks that into its own squircle, while
+# art with transparent padding (the old Big Sur 824-on-1024 grid) gets shrunk onto a gray plate.
 composite_defs = (
-    f"<defs>{gradient}{chrome}<clipPath id=\"body\"><path d=\"{body}\"/></clipPath>"
-    '<filter id="drop" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity="0.30"/></filter>'
+    f"<defs>{gradient}{chrome}"
     '<filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="5"/></filter>'
     '<filter id="lift" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.45"/></filter></defs>')
-art = (f'<g transform="translate(100,100) scale({824/1024})">'
-       f'<g filter="url(#lift)">{wing_el}</g><g filter="url(#lift)">{bubble_el}</g>{glints}</g>')
-composite = f'<path d="{body}" fill="url(#bg)" filter="url(#drop)"/><g clip-path="url(#body)">{art}</g>'
+art = f'<g filter="url(#lift)">{wing_el}</g><g filter="url(#lift)">{bubble_el}</g>{glints}'
+composite = f'<rect width="1024" height="1024" fill="url(#bg)"/>{art}'
 
 layers = {
     "background.svg": svg('<rect width="1024" height="1024" fill="url(#bg)"/>', f"<defs>{gradient}</defs>"),
