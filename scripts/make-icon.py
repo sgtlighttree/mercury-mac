@@ -12,8 +12,7 @@ Outputs:
 import json, math, os, shutil, subprocess, sys, tempfile
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else "build"
-TOP, BOTTOM = "#5B6CF0", "#1E1B4B"  # background gradient: indigo to ink
-WING = "#FFC94A"
+TOP, BOTTOM = "#2C2D34", "#101013"  # background gradient: graphite to near-black
 
 
 def svg(body, defs=""):
@@ -21,41 +20,31 @@ def svg(body, defs=""):
             f'width="1024" height="1024">{defs}{body}</svg>\n')
 
 
-# Bubble: a quicksilver blob. A closed Catmull-Rom spline through hand-placed points gives a
-# soft, slightly lopsided body that sags into a rounded tail at the lower left: one shape.
-blob_pts = [(640, 318), (790, 336), (884, 428), (904, 548), (856, 664), (744, 742), (618, 764),
-            (530, 806), (456, 846), (432, 812), (436, 748), (398, 660), (380, 548), (418, 428), (516, 346)]
-def closed_spline(p):
-    n = len(p)
-    d = f"M{p[0][0]},{p[0][1]} "
-    for i in range(n):
-        p0, p1, p2, p3 = p[i - 1], p[i], p[(i + 1) % n], p[(i + 2) % n]
-        c1 = (p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6)
-        c2 = (p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6)
-        d += f"C{c1[0]:.1f},{c1[1]:.1f} {c2[0]:.1f},{c2[1]:.1f} {p2[0]},{p2[1]} "
-    return d + "Z"
-bubble_d = closed_spline(blob_pts)
-# Chrome: bright sky on top, a dark horizon band tinted by the indigo background, bright floor.
-chrome = ('<linearGradient id="chrome" x1="0" y1="0" x2="0.15" y2="1">'
-          '<stop offset="0" stop-color="#FFFFFF"/><stop offset="0.3" stop-color="#DDE1EC"/>'
-          '<stop offset="0.58" stop-color="#8A90B6"/><stop offset="0.8" stop-color="#BCC2D8"/>'
-          '<stop offset="1" stop-color="#F3F5FA"/></linearGradient>')
-bubble_el = (f'<path d="{bubble_d}" fill="url(#chrome)"/>'
-)
+# Mark: an outline speech bubble whose ring sweeps into a three-feather wing (Mercury's).
+# Both layers share one userSpace chrome gradient so the metal reads as one continuous piece.
+cx, cy, r, ring_w = 440, 590, 210, 72
+def on_ring(deg):
+    t = math.radians(deg)
+    return cx + r * math.cos(t), cy + r * math.sin(t)
+a1, a2 = on_ring(122), on_ring(152)
+bubble_d = f"M{a1[0]:.1f},{a1[1]:.1f} A{r},{r} 0 1 0 {a2[0]:.1f},{a2[1]:.1f} L232,830 Z"
+wing_d = ("M470,382 C610,350 760,280 870,180 C840,280 770,360 650,422 Z "
+          "M642,460 C730,440 810,390 862,340 C832,418 770,470 670,508 Z "
+          "M660,550 C730,538 790,508 828,480 C802,550 750,586 660,600 Z")
+# Chrome: bright sky on top, a dark horizon band, bright floor (liquid-metal reflection).
+chrome = ('<linearGradient id="chrome" gradientUnits="userSpaceOnUse" x1="0" y1="180" x2="120" y2="870">'
+          '<stop offset="0" stop-color="#FFFFFF"/><stop offset="0.35" stop-color="#D3D7E0"/>'
+          '<stop offset="0.55" stop-color="#7C8191"/><stop offset="0.75" stop-color="#B9BECB"/>'
+          '<stop offset="1" stop-color="#EEF0F5"/></linearGradient>')
+bubble_el = (f'<path d="{bubble_d}" fill="none" stroke="url(#chrome)" stroke-width="{ring_w}" '
+             'stroke-linejoin="round"/>')
+wing_el = f'<path d="{wing_d}" fill="url(#chrome)"/>'
 # Specular glints, composite only (Icon Composer adds its own specular to the glass layers).
-glints = ('<ellipse cx="560" cy="410" rx="92" ry="34" transform="rotate(-24 560 410)" fill="#FFFFFF" opacity="0.9" filter="url(#soft)"/>'
-          '<circle cx="680" cy="372" r="14" fill="#FFFFFF" opacity="0.85" filter="url(#soft)"/>')
-
-# Wing: tapered feathers fanned from one root behind the bubble. Lengths grow toward the
-# top so the leading edge is one smooth curve and only the trailing tips stagger.
-wx, wy = 520, 470
-fan = [(186, 236, 50), (195, 300, 50), (204, 360, 50), (213, 412, 50), (222, 448, 48)]  # (angle, length, half-width)
-parts = [f'<circle cx="{wx}" cy="{wy}" r="90"/>']
-for th, L, b in fan:
-    d = (f"M0,{-b} C{L*0.55:.0f},{-b*1.1:.0f} {L*0.94:.0f},{-b*0.95:.0f} {L},{-b*0.35:.0f} "
-         f"C{L*0.93:.0f},{b*0.5:.0f} {L*0.55:.0f},{b:.0f} 0,{b} Z")
-    parts.append(f'<path transform="translate({wx},{wy}) rotate({th})" d="{d}"/>')
-wing_el = f'<g fill="{WING}">' + "".join(parts) + "</g>"
+g1, g2 = on_ring(200), on_ring(245)
+glints = (f'<path d="M{g1[0]:.1f},{g1[1]:.1f} A{r},{r} 0 0 1 {g2[0]:.1f},{g2[1]:.1f}" fill="none" stroke="#FFFFFF" '
+          'stroke-width="14" stroke-linecap="round" opacity="0.8" filter="url(#soft)"/>'
+          '<path d="M560,372 C660,345 760,290 830,232" fill="none" stroke="#FFFFFF" stroke-width="8" '
+          'stroke-linecap="round" opacity="0.7" filter="url(#soft)"/>')
 
 gradient = (f'<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{TOP}"/>'
             f'<stop offset="1" stop-color="{BOTTOM}"/></linearGradient>')
@@ -71,15 +60,15 @@ body = "M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in pts) + " Z"
 composite_defs = (
     f"<defs>{gradient}{chrome}<clipPath id=\"body\"><path d=\"{body}\"/></clipPath>"
     '<filter id="drop" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity="0.30"/></filter>'
-    '<filter id="soft"><feGaussianBlur stdDeviation="7"/></filter>'
-    '<filter id="lift" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.22"/></filter></defs>')
+    '<filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="5"/></filter>'
+    '<filter id="lift" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.45"/></filter></defs>')
 art = (f'<g transform="translate(100,100) scale({824/1024})">'
        f'<g filter="url(#lift)">{wing_el}</g><g filter="url(#lift)">{bubble_el}</g>{glints}</g>')
 composite = f'<path d="{body}" fill="url(#bg)" filter="url(#drop)"/><g clip-path="url(#body)">{art}</g>'
 
 layers = {
     "background.svg": svg('<rect width="1024" height="1024" fill="url(#bg)"/>', f"<defs>{gradient}</defs>"),
-    "wing.svg": svg(wing_el),
+    "wing.svg": svg(wing_el, f"<defs>{chrome}</defs>"),
     "bubble.svg": svg(bubble_el, f"<defs>{chrome}</defs>"),
     "composite.svg": svg(composite, composite_defs),
 }
