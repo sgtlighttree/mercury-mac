@@ -25,3 +25,8 @@ release
 *.sw?
 2026-07-11-190240-local-command-caveatcaveat-the-messages-below.txt
 2026-07-11-002627-local-command-caveatcaveat-the-messages-below.txt
+
+# secrets
+.env
+.env.*
+!.env.example
